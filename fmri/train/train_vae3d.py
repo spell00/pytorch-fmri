@@ -6,8 +6,8 @@ import json
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from fmri.utils.CycleAnnealScheduler import CycleScheduler
-from fmri.dataset import load_checkpoint, save_checkpoint, MRIDataset, _resize_data
-from fmri.transform_3d import Normalize, Flip90, Flip180, Flip270, XFlip, YFlip, ZFlip
+from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDataset, _resize_data
+from fmri.utils.transform_3d import Normalize, Flip90, Flip180, Flip270, XFlip, YFlip, ZFlip
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
 from fmri.utils.plot_performance import plot_performance
 from torch.utils.data.dataset import random_split
@@ -497,6 +497,8 @@ class Train:
             if epoch % epochs_per_checkpoint == 0:
                 img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
                 recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
+                if 'views' not in os.listdir():
+                    os.mkdir('views')
                 img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
                 recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
                 if best_epoch and save:

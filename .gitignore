@@ -1,0 +1,9 @@
+/build/
+/checkpoints/
+/dist/
+/figures/
+/fmri.egg-info/
+/logs/
+/outputs/
+/venv/
+/views/
