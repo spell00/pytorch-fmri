@@ -1,0 +1,722 @@
+import argparse
+import torch
+import torch.nn as nn
+import numpy as np
+import json
+from torch.utils.data import DataLoader
+from tensorboardX import SummaryWriter
+from fmri.utils.CycleAnnealScheduler import CycleScheduler
+from fmri.dataset import load_checkpoint, save_checkpoint, MRIDataset, _resize_data
+from fmri.transform_3d import Normalize, Flip90, Flip180, Flip270, XFlip, YFlip, ZFlip
+from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
+from fmri.utils.plot_performance import plot_performance
+from torch.utils.data.dataset import random_split
+import torchvision
+from torchvision import transforms
+# from ax.plot.contour import plot_contour
+# from ax.plot.trace import optimization_trace_single_method
+from ax.service.managed_loop import optimize
+# from ax.utils.notebook.plotting import render, init_notebook_plotting
+from ax.utils.tutorials.cnn_utils import load_mnist, train, evaluate, CNN
+import random
+
+import os
+
+output_directory = "checkpoints/"
+from torch.utils.data import Dataset
+import h5py
+import nibabel as nib
+
+torch.cuda.set_device(device=0)
+
+def load_subject(filename, mask_img):
+    subject_data = None
+    with h5py.File(filename, 'r') as f:
+        subject_data = f['SM_feature'][()]
+    # It's necessary to reorient the axes, since h5py flips axis order
+    subject_data = np.moveaxis(subject_data, [0, 1, 2, 3], [3, 2, 1, 0])
+    subject_img = nl.image.new_img_like(mask_img, subject_data, affine=mask_img.affine, copy_header=True)
+
+    return subject_img
+
+
+import nilearn as nl
+
+
+class MRIDataset2(Dataset):
+    def __init__(self, imgs, fmri_mask, basepath, targets=None, transform=None):
+        self.path = basepath
+        self.samples = imgs
+        self.targets = targets
+        self.transform = transform
+        self.mask_img = nl.image.load_img(fmri_mask)
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        x = self.samples[idx]
+        x = torch.Tensor(load_subject(self.path + x, self.mask_img).dataobj)
+        if self.targets != None:
+            y = self.targets[idx]
+        else:
+            y = None
+        if self.transform:
+            x = self.transform(x)
+        return x
+
+
+def get_means_axis():
+    import os
+    import nibabel as nib
+    import itertools
+    path = '/run/media/simon/DATA&STUFF/data/biology/images/t1/train/'
+    size = 32
+    sum_imgs = torch.zeros([size, size, size])
+    max1 = 0
+    for x in os.listdir(path):
+        x = nib.load(path + x).dataobj
+        x = np.array(x)
+        x = torch.Tensor(_resize_data(x, (size, size, size)))
+        if torch.max(x) > max1:
+            max1 = torch.max(x)
+        sum_imgs += torch.Tensor(x)
+
+    avg_voxels = sum_imgs / len(os.listdir(path))
+    imgs_averages = torch.mean(avg_voxels)
+    return avg_voxels, imgs_averages
+
+
+def normalize_images(avg_voxels, imgs_averages):
+    path = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
+    size = 32
+    sum_imgs = torch.zeros([size, size, size])
+    for i, fname in enumerate(os.listdir(path + 'train/')):
+        print(i)
+        x = nib.load(path + 'train/' + fname).dataobj
+        x = np.array(x)
+        x = _resize_data(x, (size, size, size))
+        x = x / 1213.9487
+        sum_imgs += torch.Tensor(x)
+        img = nib.Nifti1Image(x, np.eye(4))
+        img.to_filename(path + 'train_66x66/' + fname + '.nii')
+    avg_voxels = sum_imgs / len(os.listdir(path))
+
+    for i, fname in enumerate(os.listdir(path + 'valid/')):
+        x = nib.load(path + 'valid/' + fname).dataobj
+        x = np.array(x)
+        x = _resize_data(x, (size, size, size))
+        x = x / 1213.9487
+        img = nib.Nifti1Image(x, np.eye(4))
+        img.to_filename(path + 'valid_66x66/' + fname + '.nii')
+
+
+class Train:
+    def __init__(self,
+                 in_channels,
+                 out_channels,
+                 kernel_sizes,
+                 kernel_sizes_deconv,
+                 strides,
+                 strides_deconv,
+                 dilatations,
+                 dilatations_deconv,
+                 save,
+                 padding,
+                 padding_deconv,
+                 batch_size=8,
+                 epochs=1000,
+                 fp16_run=False,
+                 checkpoint_path=None,
+                 epochs_per_checkpoint=1,
+                 epochs_per_print=10,
+                 gated=True,
+                 has_dense=True,
+                 batchnorm=False,
+                 resblocks=False,
+                 flow_type='vanilla',
+                 maxpool=3,
+                 ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_sizes = kernel_sizes
+        self.kernel_sizes_deconv = kernel_sizes_deconv
+        self.strides = strides
+        self.strides_deconv = strides_deconv
+        self.dilatations = dilatations
+        self.dilatations_deconv = dilatations_deconv
+        self.padding = padding
+        self.padding_deconv = padding_deconv
+        self.batch_size = batch_size
+        self.epochs = epochs
+        self.fp16_run = fp16_run
+        self.checkpoint_path = checkpoint_path
+        self.epochs_per_checkpoint = epochs_per_checkpoint
+        self.epochs_per_print = epochs_per_print
+        self.gated = gated
+        self.has_dense = has_dense
+        self.batchnorm = batchnorm
+        self.resblocks = resblocks
+        self.flow_type = flow_type
+        self.maxpool = maxpool
+        self.n_flows = n_flows
+        self.save = save
+
+    def train(self, params):
+        mom_range = params['mom_range']
+        niter = params['niter']
+        scheduler = params['scheduler']
+        optimizer_type = params['optimizer']
+        momentum = params['momentum'].__format__('e')
+        z_dim = params['z_dim']
+        learning_rate = params['learning_rate'].__format__('e')
+        n_flows = params['n_flows']
+        weight_decay = params['weight_decay'].__format__('e')
+        warmup = params['warmup']
+        l1 = params['l1'].__format__('e')
+        l2 = params['l2'].__format__('e')
+
+        momentum = float(str(momentum)[:1] + str(momentum)[-4:])
+        weight_decay = float(str(weight_decay)[:1] + str(weight_decay)[-4:])
+        learning_rate = float(str(learning_rate)[:1] + str(learning_rate)[-4:])
+        l1 = float(str(l1)[:1] + str(l1)[-4:])
+        l2 = float(str(l2)[:1] + str(l2)[-4:])
+        print("Parameters: \n\t",
+              'zdim: ' + str(z_dim) + "\n\t",
+              'mom_range: ' + str(mom_range) + "\n\t",
+              'niter: ' + str(niter) + "\n\t",
+              'learning_rate: ' + learning_rate.__format__('e') + "\n\t",
+              'momentum: ' + str(momentum) + "\n\t",
+              'n_flows: ' + str(n_flows) + "\n\t",
+              'weight_decay: ' + weight_decay.__format__('e') + "\n\t",
+              'warmup: ' + str(warmup) + "\n\t",
+              'l1: ' + l1.__format__('e') + "\n\t",
+              'l2: ' + l2.__format__('e') + "\n\t",
+              'optimizer_type: ' + optimizer_type + "\n\t",
+              )
+
+        self.modelname = "vae_3dcnn_" \
+                         + '_flows' + flow_type + str(n_flows) \
+                         + '_bn' + str(batchnorm) \
+                         + '_niter' + str(niter) \
+                         + '_momrange' + str(mom_range) \
+                         + '_momentum' + str(momentum) \
+                         + '_' + str(optimizer_type) \
+                         + "_zdim" + str(z_dim) \
+                         + '_gated' + str(gated) \
+                         + '_resblocks' + str(resblocks) \
+                         + '_initlr' + learning_rate.__format__('e') \
+                         + '_warmup' + str(warmup) \
+                         + '_wd' + weight_decay.__format__('e') \
+                         + '_l1' + l1.__format__('e') \
+                         + '_l2' + l2.__format__('e') \
+                         + '_size' + str(size)
+
+        model = Autoencoder3DCNN(z_dim,
+                                 self.maxpool,
+                                 self.in_channels,
+                                 self.out_channels,
+                                 self.kernel_sizes,
+                                 self.kernel_sizes_deconv,
+                                 self.strides,
+                                 self.strides_deconv,
+                                 self.dilatations,
+                                 self.dilatations_deconv,
+                                 self.padding,
+                                 self.padding_deconv,
+                                 has_dense=self.has_dense,
+                                 batchnorm=self.batchnorm,
+                                 flow_type=self.flow_type,
+                                 n_flows=n_flows,
+                                 gated=self.gated,
+                                 resblocks=self.resblocks
+                                 ).cuda()
+
+        model.random_init()
+        criterion = nn.MSELoss(reduction="none")
+        if optimizer_type == 'adamw':
+            optimizer = torch.optim.AdamW(params=model.parameters(),
+                                          lr=learning_rate,
+                                          weight_decay=weight_decay,
+                                          amsgrad=True)
+        elif optimizer_type == 'sgd':
+            optimizer = torch.optim.SGD(params=model.parameters(),
+                                        lr=learning_rate,
+                                        weight_decay=weight_decay,
+                                        momentum=momentum)
+        elif optimizer_type == 'rmsprop':
+            optimizer = torch.optim.RMSprop(params=model.parameters(),
+                                            lr=learning_rate,
+                                            weight_decay=weight_decay,
+                                            momentum=momentum)
+        else:
+            exit('error: no such optimizer type available')
+        if self.fp16_run:
+            from apex import amp
+            model, optimizer = amp.initialize(model, optimizer, opt_level='O2')
+
+        # Load checkpoint if one exists
+        epoch = 0
+        best_loss = -1
+        if checkpoint_path is not None and save:
+            model, optimizer, \
+            epoch, losses, \
+            kl_divs, losses_recon, \
+            best_loss = load_checkpoint(checkpoint_path,
+                                        model,
+                                        self.maxpool,
+                                        save=self.save,
+                                        padding=self.padding,
+                                        has_dense=self.has_dense,
+                                        batchnorm=self.batchnorm,
+                                        padding_deconv=self.padding_deconv,
+                                        optimizer=optimizer,
+                                        z_dim=z_dim,
+                                        gated=self.gated,
+                                        in_channels=self.in_channels,
+                                        out_channels=self.out_channels,
+                                        kernel_sizes=self.kernel_sizes,
+                                        kernel_sizes_deconv=self.kernel_sizes_deconv,
+                                        strides=self.strides,
+                                        strides_deconv=self.strides_deconv,
+                                        dilatations=self.dilatations,
+                                        dilatations_deconv=self.dilatations_deconv,
+                                        name=self.modelname)
+
+        # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
+        # targets = torch.Tensor([0 for _ in t1])
+
+        basedir = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
+        train_path = basedir + 'train_33x33/'
+        valid_path = basedir + 'valid_33x33/'
+
+        train_transform = transforms.Compose([
+            XFlip(),
+            YFlip(),
+            ZFlip(),
+            Flip90(),
+            Flip180(),
+            Flip270(),
+            torchvision.transforms.Normalize(mean=(0.15), std=(0.18)),
+            Normalize()
+        ])
+        valid_transform = transforms.Compose([
+            torchvision.transforms.Normalize(mean=(0.15), std=(0.18)),
+            Normalize()
+        ])
+        train_set = MRIDataset(train_path, transform=train_transform)
+        valid_set = MRIDataset(valid_path, transform=valid_transform)
+
+        train_loader = DataLoader(train_set, num_workers=0,
+                                  shuffle=True,
+                                  batch_size=self.batch_size,
+                                  pin_memory=False,
+                                  drop_last=True)
+        valid_loader = DataLoader(valid_set, num_workers=0,
+                                  shuffle=True,
+                                  batch_size=2,
+                                  pin_memory=False,
+                                  drop_last=True)
+
+        # Get shared output_directory ready
+        logger = SummaryWriter('logs')
+        epoch_offset = max(1, epoch)
+
+        if scheduler == 'ReduceLROnPlateau':
+            lr_schedule = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
+                                                                     factor=0.1,
+                                                                     cooldown=50,
+                                                                     patience=50,
+                                                                     verbose=True,
+                                                                     min_lr=1e-15)
+        elif scheduler == 'CycleScheduler':
+            lr_schedule = CycleScheduler(optimizer,
+                                         learning_rate,
+                                         n_iter=niter * len(train_loader),
+                                         momentum=[
+                                             max(0.0, momentum-mom_range),
+                                             min(1.0, momentum + mom_range),
+                                         ])
+
+        elif scheduler == 'CosineAnnealingWarmRestarts':
+            lr_schedule = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+                optimizer,
+                T_0=T_0,
+                T_mult=T_mult,
+                )
+
+        losses = {
+            "train": [],
+            "valid": [],
+        }
+        kl_divs = {
+            "train": [],
+            "valid": [],
+        }
+        losses_recon = {
+            "train": [],
+            "valid": [],
+        }
+        running_abs_error = {
+            "train": [],
+            "valid": [],
+        }
+        shapes = {
+            "train": len(train_set),
+            "valid": len(valid_set),
+        }
+        early_stop_counter = 0
+
+        for epoch in range(epoch_offset, self.epochs):
+            if early_stop_counter == 250:
+                print('EARLY STOPPING.')
+                break
+            best_epoch = False
+            model.train()
+            train_losses = []
+            train_abs_error = []
+            train_kld = []
+            train_recons = []
+
+            # pbar = tqdm(total=len(train_loader))
+            for i, batch in enumerate(train_loader):
+                #    pbar.update(1)
+                lr_schedule.step()
+                model.zero_grad()
+                images = batch
+                images = torch.autograd.Variable(images).cuda()
+                images = images.unsqueeze(1)
+                reconstruct, kl = model(images)
+                reconstruct = reconstruct[:, :,
+                              :images.shape[2],
+                              :images.shape[3],
+                              :images.shape[4]].squeeze(1)
+                images = images.squeeze(1)
+                loss_recon = criterion(
+                    reconstruct,
+                    images
+                ).sum() / self.batch_size
+                kl_div = torch.mean(kl)
+                loss = loss_recon + kl_div
+                l2_reg = torch.tensor(0.)
+                l1_reg = torch.tensor(0.)
+                for name, param in model.named_parameters():
+                    if 'weight' in name:
+                        l1_reg = l1 + torch.norm(param, 1)
+                for name, param in model.named_parameters():
+                    if 'weight' in name:
+                        l2_reg = l2 + torch.norm(param, 1)
+                loss += l1 * l1_reg
+                loss += l2 * l2_reg
+                try:
+                    train_losses += [loss.item()]
+                except:
+                    return best_loss
+                train_kld += [kl_div.item()]
+                train_recons += [loss_recon.item()]
+                train_abs_error += [
+                    float(torch.mean(torch.abs_(
+                        reconstruct - images.cuda()
+                    )).item())
+                ]
+
+                if self.fp16_run:
+                    with amp.scale_loss(loss, optimizer) as scaled_loss:
+                        scaled_loss.backward()
+                    del scaled_loss
+                else:
+                    loss.backward()
+                optimizer.step()
+                logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
+                del kl, reconstruct, loss_recon, images, kl_div, loss
+
+            losses["train"] += [np.mean(train_losses)]
+            kl_divs["train"] += [np.mean(train_kld)]
+            losses_recon["train"] += [np.mean(train_recons)]
+            running_abs_error["train"] += [np.mean(train_abs_error)]
+
+            if epoch % self.epochs_per_print == 0:
+                print("Epoch: {}:\t"
+                      "Train Loss: {:.5f} , "
+                      "kld: {:.3f} , "
+                      "recon: {:.3f}"
+                      .format(epoch,
+                              losses["train"][-1],
+                              kl_divs["train"][-1],
+                              losses_recon["train"][-1])
+                      )
+
+            if np.isnan(losses["train"][-1]):
+                print('PREMATURE RETURN...')
+                return best_loss
+            model.eval()
+            valid_losses = []
+            valid_kld = []
+            valid_recons = []
+            valid_abs_error = []
+            # pbar = tqdm(total=len(valid_loader))
+            for i, batch in enumerate(valid_loader):
+                #    pbar.update(1)
+                images = batch
+                images = images.cuda()
+                images = images.unsqueeze(1)
+                reconstruct, kl = model(images)
+                reconstruct = reconstruct[:, :,
+                              :images.shape[2],
+                              :images.shape[3],
+                              :images.shape[4]].squeeze(1)
+                images = images.squeeze(1)
+                loss_recon = criterion(
+                    reconstruct,
+                    images.cuda()
+                ).sum()
+                kl_div = torch.mean(kl)
+                if epoch < warmup:
+                    kl_div = kl_div * (epoch / warmup)
+                loss = loss_recon + kl_div
+                valid_losses += [loss.item()]
+                valid_kld += [kl_div.item()]
+                valid_recons += [loss_recon.item()]
+                valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.cuda())).item())]
+                logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
+            losses["valid"] += [np.mean(valid_losses)]
+            kl_divs["valid"] += [np.mean(valid_kld)]
+            losses_recon["valid"] += [np.mean(valid_recons)]
+            running_abs_error["valid"] += [np.mean(valid_abs_error)]
+            # if epoch - epoch_offset > 5:
+            #     lr_schedule.step()
+            if losses["valid"][-1] < best_loss or best_loss == -1:
+                print('BEST EPOCH!', losses["valid"][-1])
+                early_stop_counter = 0
+                best_loss = losses["valid"][-1]
+                best_epoch = True
+            else:
+                early_stop_counter += 1
+
+            if epoch % epochs_per_checkpoint == 0:
+                img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
+                recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
+                img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
+                recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
+                if best_epoch and save:
+                    print('Saving model...')
+                    save_checkpoint(model=model,
+                                    optimizer=optimizer,
+                                    maxpool=maxpool,
+                                    padding=self.padding,
+                                    padding_deconv=self.padding_deconv,
+                                    learning_rate=learning_rate,
+                                    epoch=epoch,
+                                    checkpoint_path=output_directory,
+                                    z_dim=z_dim,
+                                    gated=self.gated,
+                                    batchnorm=self.batchnorm,
+                                    losses=losses,
+                                    kl_divs=kl_divs,
+                                    losses_recon=losses_recon,
+                                    in_channels=self.in_channels,
+                                    out_channels=self.out_channels,
+                                    kernel_sizes=self.kernel_sizes,
+                                    kernel_sizes_deconv=self.kernel_sizes_deconv,
+                                    strides=self.strides,
+                                    strides_deconv=self.strides_deconv,
+                                    dilatations=self.dilatations,
+                                    dilatations_deconv=self.dilatations_deconv,
+                                    best_loss=best_loss,
+                                    save=self.save,
+                                    name=self.modelname
+                                    )
+            if epoch % self.epochs_per_print == 0:
+                print("Epoch: {}:\t"
+                      "Valid Loss: {:.5f} , "
+                      "kld: {:.3f} , "
+                      "recon: {:.3f}"
+                      .format(epoch,
+                              losses["valid"][-1],
+                              kl_divs["valid"][-1],
+                              losses_recon["valid"][-1]
+                              )
+                      )
+                print(
+                    "Current LR:", optimizer.param_groups[0]['lr'],
+                    "Current Momentum:", optimizer.param_groups[0]['momentum']
+                )
+            plot_performance(loss_total=losses, losses_recon=losses_recon, kl_divs=kl_divs, shapes=shapes,
+                             results_path="../figures",
+                             filename="training_loss_trace_"
+                                      + self.modelname + '.jpg')
+        print('BEST LOSS :', best_loss)
+        return best_loss
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    torch.manual_seed(11)
+
+    random.seed(10)
+
+    size = 33
+    z_dim = 50
+    in_channels = [1, 64, 128, 128, 128, 256, 256]
+    out_channels = [64, 128, 128, 128, 256, 256, 256]
+    kernel_sizes = [3, 3, 3, 3, 3, 3, 3]
+    kernel_sizes_deconv = [3, 3, 3, 3, 3, 3, 3]
+    strides = [1, 1, 1, 1, 1, 1, 1]
+    strides_deconv = [1, 1, 1, 1, 1, 1, 1]
+    dilatations = [1, 1, 1, 1, 1, 1, 1]
+    dilatations_Deconv = [1, 1, 1, 1, 1, 1, 1]
+    paddings = [2, 2, 2, 2, 2, 2, 1]
+    paddings_deconv = [1, 1, 1, 1, 1, 1, 1]
+    dilatations_deconv = [1, 1, 1, 1, 1, 1, 1]
+    n_flows = 10
+    bs = 18
+    maxpool = 2
+    flow_type = 'nf'
+    epochs_per_checkpoint = 1
+    has_dense = False
+    batchnorm = False
+    gated = False
+    resblocks = True
+    checkpoint_path = "checkpoints/"
+
+    n_epochs = 10000
+    save = False
+    training = Train(in_channels,
+                     out_channels,
+                     kernel_sizes,
+                     kernel_sizes_deconv,
+                     strides,
+                     strides_deconv,
+                     dilatations,
+                     dilatations_deconv,
+                     padding=paddings,
+                     padding_deconv=paddings_deconv,
+                     batch_size=bs,
+                     epochs=n_epochs,
+                     checkpoint_path=checkpoint_path,
+                     epochs_per_checkpoint=epochs_per_checkpoint,
+                     gated=gated,
+                     resblocks=resblocks,
+                     fp16_run=False,
+                     batchnorm=batchnorm,
+                     flow_type=flow_type,
+                     save=save,
+                     maxpool=maxpool
+                     )
+    best_parameters, values, experiment, model = optimize(
+        parameters=[
+            {"name": "warmup", "type": "choice", "values": [0, 0]},
+            {"name": "mom_range", "type": "range", "bounds": [0.01, 0.5]},
+            {"name": "niter", "type": "range", "bounds": [10, 10000]},
+            {"name": "z_dim", "type": "range", "bounds": [2, 256]},
+            {"name": "n_flows", "type": "choice", "values": [0, 10]},
+            {"name": "scheduler", "type": "choice", "values":
+                ['CycleScheduler', 'CycleScheduler']},
+            {"name": "optimizer", "type": "choice", "values": ['sgd', 'sgd']},
+            {"name": "l1", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
+            {"name": "l2", "type": "range", "bounds":  [1e-14, 1e-1], "log_scale": True},
+            {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
+            {"name": "momentum", "type": "range", "bounds": [0.0, 1.0]},
+            {"name": "learning_rate", "type": "range", "bounds": [1e-8, 1e-2], "log_scale": True},
+        ],
+        evaluation_function=training.train,
+        objective_name='loss',
+        minimize=True,
+        total_trials=100
+    )
+    from matplotlib import pyplot as plt
+
+    fig = plt.figure()
+    # render(plot_contour(model=model, param_x="learning_rate", param_y="weight_decay", metric_name='Loss'))
+    # fig.savefig('test.jpg')
+    print('Best Loss:', values[0]['loss'])
+    print('Best Parameters:')
+    print(json.dumps(best_parameters, indent=4))
+
+    # cv_results = cross_validate(model)
+    # render(interact_cross_validation(cv_results))
+
+"""
+z_dim = 256
+in_channels =        [1,  16, 32, 64,  128, 256,   z_dim]
+out_channels =       [16, 32, 64, 128, 256, z_dim, z_dim]
+kernel_sizes =       [3,   3, 3,  3,   3,   3,     3]
+strides =            [1,   1, 1,  1,   1,   1,     1]
+dilatations =        [1,   1, 1,  1,   1,   1,     1]
+paddings =           [2,   2, 2,  2,   2,   2,     1]
+dilatations_deconv = [1,   1, 1,  1,   1,   1,     1]
+n_flows = 0
+n_epochs = 100000
+bs = 1
+maxpool = 2
+
+z_dim = 256
+in_channels =        [1,  128,  256, z_dim]
+out_channels =       [128, 256, z_dim, z_dim]
+kernel_sizes =       [3,  3,   3,   3]
+strides =            [1,  1,   1,   1]
+dilatations =        [1,  1,   1,   1]
+paddings =           [2,  2,   2,   2]
+dilatations_deconv = [1,  1,   1,   1]
+n_flows = 1
+n_epochs = 100000
+bs = 4
+maxpool = 3
+
+size = 33
+z_dim = 100
+in_channels =        [1,  128,  256, z_dim]
+out_channels =       [128, 256, z_dim, z_dim]
+kernel_sizes =       [3,  3,   3,   3]
+kernel_sizes_deconv =       [3,  3,   3,   3]
+strides =            [1,  1,   1,   1]
+strides_deconv =            [1,  1,   1,   1]
+dilatations =        [1,  1,   1,   1]
+paddings =           [2,  2,   2,   2]
+paddings_deconv =    [1,  1,   1,   1]
+dilatations_deconv = [1,  1,   1,   1]
+n_flows = 10
+n_epochs = 100000
+bs = 4
+maxpool = 3
+flow_type = 'nf'
+epochs_per_checkpoint = 1
+gated = False
+resblocks = True
+checkpoint_path = "checkpoints/"
+
+"""
+
+"""
+train(name,
+z_dim,
+in_channels,
+out_channels,
+kernel_sizes,
+kernel_sizes_deconv,
+strides,
+strides_deconv,
+dilatations,
+dilatations_deconv,
+padding=paddings,
+padding_deconv=paddings_deconv,
+batch_size=bs,
+epochs=n_epochs,
+checkpoint_path=checkpoint_path,
+epochs_per_checkpoint=epochs_per_checkpoint,
+gated=gated,
+resblocks=resblocks,
+n_flows=n_flows,
+fp16_run=False,
+batchnorm=batchnorm,
+flow_type=flow_type,
+learning_rate=1e-3,
+maxpool=maxpool,
+weight_decay=0,
+warmup=0,
+l1=0,
+l2=0
+)
+
+"""

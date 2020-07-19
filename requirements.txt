@@ -1,0 +1,12 @@
+torch # nightly
+matplotlib
+numpy
+scipy
+tensorboardX
+Unidecode
+pillow
+ax-platform
+pandas
+sklearn
+scikit-learn
+setuptools
