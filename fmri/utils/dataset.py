@@ -85,7 +85,8 @@ def load_checkpoint(checkpoint_path,
         "train": [],
         "valid": [],
     }
-
+    if checkpoint_path not in os.listdir():
+        os.mkdir(checkpoint_path)
     if name not in os.listdir(checkpoint_path):
         print("Creating checkpoint...")
         if save:
@@ -112,7 +113,7 @@ def load_checkpoint(checkpoint_path,
                             dilatations_deconv=dilatations_deconv,
                             batchnorm=batchnorm,
                             name=name)
-    checkpoint_dict = torch.load(checkpoint_path + name, map_location='cpu')
+    checkpoint_dict = torch.load(checkpoint_path + '/' + name, map_location='cpu')
     epoch = checkpoint_dict['epoch']
     best_loss = checkpoint_dict['best_loss']
     optimizer.load_state_dict(checkpoint_dict['optimizer'])
@@ -179,5 +180,5 @@ def save_checkpoint(model,
                 'losses_recon': losses_recon,
                 'epoch': epoch,
                 'optimizer': optimizer.state_dict(),
-                'learning_rate': learning_rate}, checkpoint_path + name)
+                'learning_rate': learning_rate}, checkpoint_path + '/' + name)
 

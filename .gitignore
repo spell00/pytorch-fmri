@@ -7,3 +7,5 @@
 /outputs/
 /venv/
 /views/
+/fmri/train/logs/
+/fmri/train/views/

@@ -1,7 +1,6 @@
 from fmri.models.supervised.cnn3d import Simple3DCNN, ConvResnet3D
 from fmri.utils.CycleAnnealScheduler import CycleScheduler
 from torch.utils.data import DataLoader
-from fmri.data_preparation.load_wavs_as_tensor import Wave2tensor
 import torch.nn as nn
 import os
 import torch

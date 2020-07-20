@@ -110,6 +110,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                  batchnorm,
                  flow_type="nf",
                  n_flows=2,
+                 n_res=3,
                  gated=True,
                  has_dense=True,
                  resblocks=False,
@@ -131,6 +132,7 @@ class Autoencoder3DCNN(torch.nn.Module):
         self.relu = torch.nn.LeakyReLU()
         self.has_dense = has_dense
         self.batchnorm = batchnorm
+        self.n_res = n_res
         for ins, outs, ksize, stride, dilats, pad in zip(in_channels, out_channels,
                                                          kernel_sizes, strides,
                                                          dilatations, padding):
@@ -155,9 +157,8 @@ class Autoencoder3DCNN(torch.nn.Module):
                                 activation=nn.Tanh()
                                 )]
             if resblocks:
-                self.resconv += [ResBlock(ins, outs).cuda()]
-                self.resconv1 += [ResBlock(ins, outs).cuda()]
-                self.resconv2 += [ResBlock(ins, outs).cuda()]
+                for _ in range(n_res):
+                    self.resconv += [ResBlock(ins, outs).cuda()]
             self.bns += [nn.BatchNorm3d(num_features=outs).cuda()]
 
         for ins, outs, ksize, stride, dilats, pad in zip(reversed(out_channels),
@@ -177,9 +178,8 @@ class Autoencoder3DCNN(torch.nn.Module):
                                                             activation=nn.Tanh()
                                                             )]
             if resblocks:
-                self.resdeconv += [ResBlockDeconv(ins, outs).cuda(),]
-                self.resdeconv1 += [ResBlockDeconv(ins, outs).cuda(),]
-                self.resdeconv2 += [ResBlockDeconv(ins, outs).cuda(),]
+                for _ in range(n_res):
+                    self.resdeconv += [ResBlockDeconv(ins, outs).cuda()]
 
             self.bns_deconv += [nn.BatchNorm3d(num_features=outs).cuda()]
 
@@ -221,18 +221,20 @@ class Autoencoder3DCNN(torch.nn.Module):
         return kl
 
     def encoder(self, x):
+        j = 0
         for i in range(len(self.conv_layers)):
             if self.resblocks:
-                x = self.resconv[i](x)
-                x = self.resconv1[i](x)
-                x = self.resconv2[i](x)
+                for _ in range(self.n_res):
+                    x = self.resconv[j](x)
+                    j += 1
             x = self.conv_layers[i](x)
-            x, self.indices[i] = self.maxpool(x)
             if self.batchnorm:
                 if x.shape[0] != 1:
                     x = self.bns[i](x)
             x = self.relu(x)
             x = self.dropout(x)
+            x, self.indices[i] = self.maxpool(x)
+
         z = x.squeeze()
         if self.has_dense:
             z = self.dense1(z)
@@ -252,12 +254,13 @@ class Autoencoder3DCNN(torch.nn.Module):
                     z = self.dense2_bn(z)
             z = self.dropout(z)
 
+        j = 0
         x = z.unsqueeze(2).unsqueeze(3).unsqueeze(4)
         for i in range(len(self.deconv_layers)):
             if self.resblocks:
-                x = self.resdeconv[i](x)
-                x = self.resdeconv1[i](x)
-                x = self.resdeconv2[i](x)
+                for _ in range(self.n_res):
+                    x = self.resdeconv[j](x)
+                    j += 1
             ind = self.indices[len(self.indices) - 1 - i]
             x = self.maxunpool(x[:, :, :ind.shape[2], :ind.shape[3], :ind.shape[4]], ind)
             x = self.deconv_layers[i](x)

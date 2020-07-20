@@ -22,7 +22,7 @@ import random
 
 import os
 
-output_directory = "checkpoints/"
+output_directory = "checkpoints"
 from torch.utils.data import Dataset
 import h5py
 import nibabel as nib
@@ -252,9 +252,9 @@ class Train:
                                             momentum=momentum)
         else:
             exit('error: no such optimizer type available')
-        if self.fp16_run:
-            from apex import amp
-            model, optimizer = amp.initialize(model, optimizer, opt_level='O2')
+        # if self.fp16_run:
+        #     from apex import amp
+         #    model, optimizer = amp.initialize(model, optimizer, opt_level='O2')
 
         # Load checkpoint if one exists
         epoch = 0
@@ -339,13 +339,6 @@ class Train:
                                              min(1.0, momentum + mom_range),
                                          ])
 
-        elif scheduler == 'CosineAnnealingWarmRestarts':
-            lr_schedule = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-                optimizer,
-                T_0=T_0,
-                T_mult=T_mult,
-                )
-
         losses = {
             "train": [],
             "valid": [],
@@ -369,7 +362,7 @@ class Train:
         early_stop_counter = 0
 
         for epoch in range(epoch_offset, self.epochs):
-            if early_stop_counter == 250:
+            if early_stop_counter == 100:
                 print('EARLY STOPPING.')
                 break
             best_epoch = False
@@ -421,12 +414,12 @@ class Train:
                     )).item())
                 ]
 
-                if self.fp16_run:
-                    with amp.scale_loss(loss, optimizer) as scaled_loss:
-                        scaled_loss.backward()
-                    del scaled_loss
-                else:
-                    loss.backward()
+                #if self.fp16_run:
+                #    with amp.scale_loss(loss, optimizer) as scaled_loss:
+                #        scaled_loss.backward()
+                #    del scaled_loss
+                #else:
+                loss.backward()
                 optimizer.step()
                 logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
                 del kl, reconstruct, loss_recon, images, kl_div, loss
@@ -475,7 +468,10 @@ class Train:
                 if epoch < warmup:
                     kl_div = kl_div * (epoch / warmup)
                 loss = loss_recon + kl_div
-                valid_losses += [loss.item()]
+                try:
+                    valid_losses += [loss.item()]
+                except:
+                    return best_loss
                 valid_kld += [kl_div.item()]
                 valid_recons += [loss_recon.item()]
                 valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.cuda())).item())]
@@ -540,10 +536,9 @@ class Train:
                               losses_recon["valid"][-1]
                               )
                       )
-                print(
-                    "Current LR:", optimizer.param_groups[0]['lr'],
-                    "Current Momentum:", optimizer.param_groups[0]['momentum']
-                )
+                print("Current LR:", optimizer.param_groups[0]['lr'])
+                if 'momentum' in optimizer.param_groups[0].keys():
+                    print("Current Momentum:", optimizer.param_groups[0]['momentum'])
             plot_performance(loss_total=losses, losses_recon=losses_recon, kl_divs=kl_divs, shapes=shapes,
                              results_path="../figures",
                              filename="training_loss_trace_"
@@ -580,10 +575,10 @@ if __name__ == "__main__":
     batchnorm = False
     gated = False
     resblocks = True
-    checkpoint_path = "checkpoints/"
+    checkpoint_path = "checkpoints"
 
     n_epochs = 10000
-    save = False
+    save = True
     training = Train(in_channels,
                      out_channels,
                      kernel_sizes,
@@ -615,11 +610,11 @@ if __name__ == "__main__":
             {"name": "n_flows", "type": "choice", "values": [0, 10]},
             {"name": "scheduler", "type": "choice", "values":
                 ['CycleScheduler', 'CycleScheduler']},
-            {"name": "optimizer", "type": "choice", "values": ['sgd', 'sgd']},
+            {"name": "optimizer", "type": "choice", "values": ['rmsprop', 'rmsprop']},
             {"name": "l1", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "l2", "type": "range", "bounds":  [1e-14, 1e-1], "log_scale": True},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
-            {"name": "momentum", "type": "range", "bounds": [0.0, 1.0]},
+            {"name": "momentum", "type": "range", "bounds": [0., 1.]},
             {"name": "learning_rate", "type": "range", "bounds": [1e-8, 1e-2], "log_scale": True},
         ],
         evaluation_function=training.train,
