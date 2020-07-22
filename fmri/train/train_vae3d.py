@@ -165,10 +165,11 @@ class Train:
 
     def train(self, params):
         mom_range = params['mom_range']
+        n_res = params['n_res']
         niter = params['niter']
         scheduler = params['scheduler']
         optimizer_type = params['optimizer']
-        momentum = params['momentum'].__format__('e')
+        momentum = params['momentum']
         z_dim = params['z_dim']
         learning_rate = params['learning_rate'].__format__('e')
         n_flows = params['n_flows']
@@ -177,7 +178,6 @@ class Train:
         l1 = params['l1'].__format__('e')
         l2 = params['l2'].__format__('e')
 
-        momentum = float(str(momentum)[:1] + str(momentum)[-4:])
         weight_decay = float(str(weight_decay)[:1] + str(weight_decay)[-4:])
         learning_rate = float(str(learning_rate)[:1] + str(learning_rate)[-4:])
         l1 = float(str(l1)[:1] + str(l1)[-4:])
@@ -186,6 +186,7 @@ class Train:
               'zdim: ' + str(z_dim) + "\n\t",
               'mom_range: ' + str(mom_range) + "\n\t",
               'niter: ' + str(niter) + "\n\t",
+              'nres: ' + str(n_res) + "\n\t",
               'learning_rate: ' + learning_rate.__format__('e') + "\n\t",
               'momentum: ' + str(momentum) + "\n\t",
               'n_flows: ' + str(n_flows) + "\n\t",
@@ -200,6 +201,7 @@ class Train:
                          + '_flows' + flow_type + str(n_flows) \
                          + '_bn' + str(batchnorm) \
                          + '_niter' + str(niter) \
+                         + '_nres' + str(n_res) \
                          + '_momrange' + str(mom_range) \
                          + '_momentum' + str(momentum) \
                          + '_' + str(optimizer_type) \
@@ -229,6 +231,7 @@ class Train:
                                  batchnorm=self.batchnorm,
                                  flow_type=self.flow_type,
                                  n_flows=n_flows,
+                                 n_res=n_res,
                                  gated=self.gated,
                                  resblocks=self.resblocks
                                  ).cuda()
@@ -287,7 +290,7 @@ class Train:
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
 
-        basedir = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
+        basedir = '/media/simon/DATA&STUFF/data/biology/images/t1/'
         train_path = basedir + 'train_33x33/'
         valid_path = basedir + 'valid_33x33/'
 
@@ -327,7 +330,7 @@ class Train:
             lr_schedule = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
                                                                      factor=0.1,
                                                                      cooldown=50,
-                                                                     patience=50,
+                                                                     patience=100,
                                                                      verbose=True,
                                                                      min_lr=1e-15)
         elif scheduler == 'CycleScheduler':
@@ -362,7 +365,7 @@ class Train:
         early_stop_counter = 0
 
         for epoch in range(epoch_offset, self.epochs):
-            if early_stop_counter == 100:
+            if early_stop_counter == 250:
                 print('EARLY STOPPING.')
                 break
             best_epoch = False
@@ -375,7 +378,6 @@ class Train:
             # pbar = tqdm(total=len(train_loader))
             for i, batch in enumerate(train_loader):
                 #    pbar.update(1)
-                lr_schedule.step()
                 model.zero_grad()
                 images = batch
                 images = torch.autograd.Variable(images).cuda()
@@ -402,6 +404,12 @@ class Train:
                         l2_reg = l2 + torch.norm(param, 1)
                 loss += l1 * l1_reg
                 loss += l2 * l2_reg
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), 1e-8)
+                loss.backward()
+                # not sure if before or after
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), 100)
+                # lr_schedule.step()
+
                 try:
                     train_losses += [loss.item()]
                 except:
@@ -419,10 +427,16 @@ class Train:
                 #        scaled_loss.backward()
                 #    del scaled_loss
                 #else:
-                loss.backward()
                 optimizer.step()
                 logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
-                del kl, reconstruct, loss_recon, images, kl_div, loss
+                del kl, loss_recon, kl_div, loss
+
+            img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
+            recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
+            if 'views' not in os.listdir():
+                os.mkdir('views')
+            img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
+            recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
 
             losses["train"] += [np.mean(train_losses)]
             kl_divs["train"] += [np.mean(train_kld)]
@@ -480,12 +494,15 @@ class Train:
             kl_divs["valid"] += [np.mean(valid_kld)]
             losses_recon["valid"] += [np.mean(valid_recons)]
             running_abs_error["valid"] += [np.mean(valid_abs_error)]
-            # if epoch - epoch_offset > 5:
-            #     lr_schedule.step()
-            if losses["valid"][-1] < best_loss or best_loss == -1:
-                print('BEST EPOCH!', losses["valid"][-1])
+            if epoch - epoch_offset > 5:
+                lr_schedule.step(losses["train"][-1])
+            # should be valid, but train is ok to test if it can be done without caring about
+            # generalisation
+            mode = 'train'
+            if losses[mode][-1] < best_loss or best_loss == -1:
+                print('BEST EPOCH!', losses[mode][-1])
                 early_stop_counter = 0
-                best_loss = losses["valid"][-1]
+                best_loss = losses[mode][-1]
                 best_epoch = True
             else:
                 early_stop_counter += 1
@@ -567,12 +584,12 @@ if __name__ == "__main__":
     paddings_deconv = [1, 1, 1, 1, 1, 1, 1]
     dilatations_deconv = [1, 1, 1, 1, 1, 1, 1]
     n_flows = 10
-    bs = 18
+    bs = 6
     maxpool = 2
     flow_type = 'nf'
     epochs_per_checkpoint = 1
     has_dense = False
-    batchnorm = False
+    batchnorm = True
     gated = False
     resblocks = True
     checkpoint_path = "checkpoints"
@@ -604,18 +621,19 @@ if __name__ == "__main__":
     best_parameters, values, experiment, model = optimize(
         parameters=[
             {"name": "warmup", "type": "choice", "values": [0, 0]},
-            {"name": "mom_range", "type": "range", "bounds": [0.01, 0.5]},
+            {"name": "mom_range", "type": "choice", "values": [0, 0]},
             {"name": "niter", "type": "range", "bounds": [10, 10000]},
-            {"name": "z_dim", "type": "range", "bounds": [2, 256]},
+            {"name": "n_res", "type": "choice", "values": [20, 20]},
+            {"name": "z_dim", "type": "range", "bounds": [50, 256]},
             {"name": "n_flows", "type": "choice", "values": [0, 10]},
             {"name": "scheduler", "type": "choice", "values":
-                ['CycleScheduler', 'CycleScheduler']},
+                ['ReduceLROnPlateau', 'ReduceLROnPlateau']},
             {"name": "optimizer", "type": "choice", "values": ['rmsprop', 'rmsprop']},
             {"name": "l1", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "l2", "type": "range", "bounds":  [1e-14, 1e-1], "log_scale": True},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
-            {"name": "momentum", "type": "range", "bounds": [0., 1.]},
-            {"name": "learning_rate", "type": "range", "bounds": [1e-8, 1e-2], "log_scale": True},
+            {"name": "momentum", "type": "range", "bounds": [0.9, 1.]},
+            {"name": "learning_rate", "type": "range", "bounds": [1e-5, 1e-3], "log_scale": True},
         ],
         evaluation_function=training.train,
         objective_name='loss',

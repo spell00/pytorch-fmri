@@ -9,3 +9,5 @@
 /views/
 /fmri/train/logs/
 /fmri/train/views/
+/fmri/train/checkpoints/
+/fmri/figures/
