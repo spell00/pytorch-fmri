@@ -142,7 +142,9 @@ class Train:
                  flow_type='vanilla',
                  maxpool=3,
                  verbose=2,
-                 size=32
+                 size=32,
+                 mean=0.107,
+                 std=0.133,
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -173,6 +175,8 @@ class Train:
         self.train_path = train_path
         self.valid_path = valid_path
         self.size = size
+        self.std = std
+        self.mean = mean
 
     def train(self, params):
         num_elements = params['num_elements']
@@ -342,11 +346,11 @@ class Train:
             Flip90(),
             Flip180(),
             Flip270(),
-            torchvision.transforms.Normalize(mean=(0.15), std=(0.18)),
+            torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
             Normalize()
         ])
         valid_transform = transforms.Compose([
-            torchvision.transforms.Normalize(mean=(0.15), std=(0.18)),
+            torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
             Normalize()
         ])
         train_set = MRIDataset(self.train_path, transform=train_transform)
