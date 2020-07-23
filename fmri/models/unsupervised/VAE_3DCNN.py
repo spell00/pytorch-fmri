@@ -69,7 +69,7 @@ class ResBlock(nn.Module):
         )
 
     def forward(self, input):
-        out = self.conv(input)
+        out = self.conv.cuda()(input)
         out += input
 
         return out
@@ -159,8 +159,8 @@ class Autoencoder3DCNN(torch.nn.Module):
                                 )]
             if resblocks and i != 0:
                 for _ in range(n_res):
-                    self.resconv += [ResBlock(ins, outs).cuda()]
-            self.bns += [nn.BatchNorm3d(num_features=outs).cuda()]
+                    self.resconv += [ResBlock(ins, outs)]
+            self.bns += [nn.BatchNorm3d(num_features=outs)]
 
         for i, (ins, outs, ksize, stride, dilats, pad) in enumerate(zip(reversed(out_channels),
                                                          reversed(in_channels),
@@ -182,7 +182,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                 for _ in range(n_res):
                     self.resdeconv += [ResBlockDeconv(ins, outs).cuda()]
 
-            self.bns_deconv += [nn.BatchNorm3d(num_features=outs).cuda()]
+            self.bns_deconv += [nn.BatchNorm3d(num_features=outs)]
 
         self.dense1 = torch.nn.Linear(in_features=out_channels[-1], out_features=z_dim)
         self.dense2 = torch.nn.Linear(in_features=z_dim, out_features=out_channels[-1])
@@ -263,7 +263,7 @@ class Autoencoder3DCNN(torch.nn.Module):
             x = self.conv_layers[i](x)
             if self.batchnorm:
                 if x.shape[0] != 1:
-                    x = self.bns[i](x)
+                    x = self.bns[i].cuda()(x)
             x = self.relu(x)
             x = self.dropout(x)
             x, self.indices[i] = self.maxpool(x)
@@ -294,7 +294,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                 for _ in range(self.n_res):
                     if self.batchnorm:
                         if x.shape[0] != 1:
-                            x = self.bns_deconv[i-1](x)
+                            x = self.bns_deconv[i-1].cuda()(x)
                     x = self.resdeconv[j](x)
                     j += 1
             ind = self.indices[len(self.indices) - 1 - i]
@@ -303,7 +303,7 @@ class Autoencoder3DCNN(torch.nn.Module):
             if i < len(self.deconv_layers) - 1:
                 if self.batchnorm:
                     if x.shape[0] != 1:
-                       x = self.bns_deconv[i](x)
+                       x = self.bns_deconv[i].cuda()(x)
                 x = self.relu(x)
                 x = self.dropout(x)
 

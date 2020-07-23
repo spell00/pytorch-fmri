@@ -335,7 +335,7 @@ class Train:
                                         resblocks=resblocks,
                                         h_last=self.out_channels[-1],
                                         )
-
+        model = model.cuda()
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
 
@@ -543,7 +543,7 @@ class Train:
             losses_recon["valid"] += [np.mean(valid_recons)]
             running_abs_error["valid"] += [np.mean(valid_abs_error)]
             if epoch - epoch_offset > 5:
-                lr_schedule.step(losses["train"][-1])
+                lr_schedule.step(losses["valid"][-1])
             # should be valid, but train is ok to test if it can be done without caring about
             # generalisation
             mode = 'train'
@@ -592,7 +592,10 @@ class Train:
                                     save=self.save,
                                     name=self.modelname,
                                     n_flows=n_flows,
-                                    flow_type=self.flow_type
+                                    flow_type=self.flow_type,
+                                    n_res=n_res,
+                                    resblocks=resblocks,
+                                    h_last=z_dim
                                     )
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 0:
@@ -686,7 +689,7 @@ if __name__ == "__main__":
             {"name": "niter", "type": "choice", "values": [10, 10]},
             {"name": "n_res", "type": "range", "bounds": [0, 10]},
             {"name": "z_dim", "type": "range", "bounds": [50, 256]},
-            {"name": "n_flows", "type": "range", "bounds": [2, 100]},
+            {"name": "n_flows", "type": "range", "bounds": [2, 20]},
             {"name": "scheduler", "type": "choice", "values":
                 ['ReduceLROnPlateau', 'ReduceLROnPlateau']},
             {"name": "optimizer", "type": "choice", "values": ['rmsprop', 'rmsprop']},
