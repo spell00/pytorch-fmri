@@ -12,3 +12,11 @@
 /fmri/train/views/
 /fmri/train/checkpoints/
 /fmri/figures/
+/fmri/__pycache__/
+/fmri/dimension_reduction/__pycache__/
+/fmri/models/__pycache__/
+/fmri/models/semi_supervised/__pycache__/
+/fmri/models/supervised/__pycache__/
+/fmri/models/unsupervised/__pycache__/
+/fmri/models/utils/__pycache__/
+/fmri/utils/__pycache__/
