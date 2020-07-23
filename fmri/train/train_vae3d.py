@@ -9,6 +9,7 @@ from fmri.utils.CycleAnnealScheduler import CycleScheduler
 from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDataset, _resize_data
 from fmri.utils.transform_3d import Normalize, Flip90, Flip180, Flip270, XFlip, YFlip, ZFlip
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
+from fmri.models.unsupervised.SylvesterVAE3DCNN import SylvesterVAE
 from fmri.utils.plot_performance import plot_performance
 from torch.utils.data.dataset import random_split
 import torchvision
@@ -28,6 +29,7 @@ import h5py
 import nibabel as nib
 
 torch.cuda.set_device(device=0)
+
 
 def load_subject(filename, mask_img):
     subject_data = None
@@ -124,6 +126,7 @@ class Train:
                  save,
                  padding,
                  padding_deconv,
+                 num_elements=0,
                  batch_size=8,
                  epochs=1000,
                  fp16_run=False,
@@ -136,6 +139,7 @@ class Train:
                  resblocks=False,
                  flow_type='vanilla',
                  maxpool=3,
+                 verbose=2
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -160,10 +164,12 @@ class Train:
         self.resblocks = resblocks
         self.flow_type = flow_type
         self.maxpool = maxpool
-        self.n_flows = n_flows
+        self.num_elements = num_elements
         self.save = save
+        self.verbose = verbose
 
     def train(self, params):
+        num_elements = params['num_elements']
         mom_range = params['mom_range']
         n_res = params['n_res']
         niter = params['niter']
@@ -182,20 +188,22 @@ class Train:
         learning_rate = float(str(learning_rate)[:1] + str(learning_rate)[-4:])
         l1 = float(str(l1)[:1] + str(l1)[-4:])
         l2 = float(str(l2)[:1] + str(l2)[-4:])
-        print("Parameters: \n\t",
-              'zdim: ' + str(z_dim) + "\n\t",
-              'mom_range: ' + str(mom_range) + "\n\t",
-              'niter: ' + str(niter) + "\n\t",
-              'nres: ' + str(n_res) + "\n\t",
-              'learning_rate: ' + learning_rate.__format__('e') + "\n\t",
-              'momentum: ' + str(momentum) + "\n\t",
-              'n_flows: ' + str(n_flows) + "\n\t",
-              'weight_decay: ' + weight_decay.__format__('e') + "\n\t",
-              'warmup: ' + str(warmup) + "\n\t",
-              'l1: ' + l1.__format__('e') + "\n\t",
-              'l2: ' + l2.__format__('e') + "\n\t",
-              'optimizer_type: ' + optimizer_type + "\n\t",
-              )
+        if self.verbose > 1:
+            print("Parameters: \n\t",
+                  'zdim: ' + str(z_dim) + "\n\t",
+                  'mom_range: ' + str(mom_range) + "\n\t",
+                  'num_elements: ' + str(num_elements) + "\n\t",
+                  'niter: ' + str(niter) + "\n\t",
+                  'nres: ' + str(n_res) + "\n\t",
+                  'learning_rate: ' + learning_rate.__format__('e') + "\n\t",
+                  'momentum: ' + str(momentum) + "\n\t",
+                  'n_flows: ' + str(n_flows) + "\n\t",
+                  'weight_decay: ' + weight_decay.__format__('e') + "\n\t",
+                  'warmup: ' + str(warmup) + "\n\t",
+                  'l1: ' + l1.__format__('e') + "\n\t",
+                  'l2: ' + l2.__format__('e') + "\n\t",
+                  'optimizer_type: ' + optimizer_type + "\n\t",
+                  )
 
         self.modelname = "vae_3dcnn_" \
                          + '_flows' + flow_type + str(n_flows) \
@@ -214,28 +222,53 @@ class Train:
                          + '_l1' + l1.__format__('e') \
                          + '_l2' + l2.__format__('e') \
                          + '_size' + str(size)
-
-        model = Autoencoder3DCNN(z_dim,
-                                 self.maxpool,
-                                 self.in_channels,
-                                 self.out_channels,
-                                 self.kernel_sizes,
-                                 self.kernel_sizes_deconv,
-                                 self.strides,
-                                 self.strides_deconv,
-                                 self.dilatations,
-                                 self.dilatations_deconv,
-                                 self.padding,
-                                 self.padding_deconv,
-                                 has_dense=self.has_dense,
+        if flow_type != 'o-sylvester':
+            model = Autoencoder3DCNN(z_dim,
+                                     self.maxpool,
+                                     self.in_channels,
+                                     self.out_channels,
+                                     self.kernel_sizes,
+                                     self.kernel_sizes_deconv,
+                                     self.strides,
+                                     self.strides_deconv,
+                                     self.dilatations,
+                                     self.dilatations_deconv,
+                                     self.padding,
+                                     self.padding_deconv,
+                                     has_dense=self.has_dense,
+                                     batchnorm=self.batchnorm,
+                                     flow_type=self.flow_type,
+                                     n_flows=n_flows,
+                                     n_res=n_res,
+                                     gated=self.gated,
+                                     resblocks=self.resblocks
+                                     ).cuda()
+        else:
+            model = SylvesterVAE(z_dim=z_dim,
+                                 maxpool=self.maxpool,
+                                 in_channels=self.in_channels,
+                                 out_channels=self.out_channels,
+                                 kernel_sizes=self.kernel_sizes,
+                                 kernel_sizes_deconv=self.kernel_sizes_deconv,
+                                 strides=self.strides,
+                                 strides_deconv=self.strides_deconv,
+                                 dilatations=self.dilatations,
+                                 dilatations_deconv=self.dilatations_deconv,
+                                 padding=self.padding,
+                                 padding_deconv=self.padding_deconv,
                                  batchnorm=self.batchnorm,
                                  flow_type=self.flow_type,
-                                 n_flows=n_flows,
                                  n_res=n_res,
                                  gated=self.gated,
-                                 resblocks=self.resblocks
-                                 ).cuda()
+                                 has_dense=self.has_dense,
+                                 resblocks=self.resblocks,
+                                 h_last=z_dim,
+                                 n_flows=self.n_flows,
+                                 num_elements=3,
+                                 auxiliary=False,
+                                 a_dim=0,
 
+                                 )
         model.random_init()
         criterion = nn.MSELoss(reduction="none")
         if optimizer_type == 'adamw':
@@ -257,7 +290,7 @@ class Train:
             exit('error: no such optimizer type available')
         # if self.fp16_run:
         #     from apex import amp
-         #    model, optimizer = amp.initialize(model, optimizer, opt_level='O2')
+        #    model, optimizer = amp.initialize(model, optimizer, opt_level='O2')
 
         # Load checkpoint if one exists
         epoch = 0
@@ -273,6 +306,7 @@ class Train:
                                         padding=self.padding,
                                         has_dense=self.has_dense,
                                         batchnorm=self.batchnorm,
+                                        flow_type=flow_type,
                                         padding_deconv=self.padding_deconv,
                                         optimizer=optimizer,
                                         z_dim=z_dim,
@@ -285,7 +319,12 @@ class Train:
                                         strides_deconv=self.strides_deconv,
                                         dilatations=self.dilatations,
                                         dilatations_deconv=self.dilatations_deconv,
-                                        name=self.modelname)
+                                        name=self.modelname,
+                                        n_flows=n_flows,
+                                        n_res=n_res,
+                                        resblocks=resblocks,
+                                        h_last=self.out_channels[-1],
+                                        )
 
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
@@ -330,7 +369,7 @@ class Train:
             lr_schedule = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
                                                                      factor=0.1,
                                                                      cooldown=50,
-                                                                     patience=100,
+                                                                     patience=200,
                                                                      verbose=True,
                                                                      min_lr=1e-15)
         elif scheduler == 'CycleScheduler':
@@ -338,7 +377,7 @@ class Train:
                                          learning_rate,
                                          n_iter=niter * len(train_loader),
                                          momentum=[
-                                             max(0.0, momentum-mom_range),
+                                             max(0.0, momentum - mom_range),
                                              min(1.0, momentum + mom_range),
                                          ])
 
@@ -365,8 +404,9 @@ class Train:
         early_stop_counter = 0
 
         for epoch in range(epoch_offset, self.epochs):
-            if early_stop_counter == 250:
-                print('EARLY STOPPING.')
+            if early_stop_counter == 500:
+                if self.verbose > 0:
+                    print('EARLY STOPPING.')
                 break
             best_epoch = False
             model.train()
@@ -422,11 +462,11 @@ class Train:
                     )).item())
                 ]
 
-                #if self.fp16_run:
+                # if self.fp16_run:
                 #    with amp.scale_loss(loss, optimizer) as scaled_loss:
                 #        scaled_loss.backward()
                 #    del scaled_loss
-                #else:
+                # else:
                 optimizer.step()
                 logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
                 del kl, loss_recon, kl_div, loss
@@ -444,18 +484,20 @@ class Train:
             running_abs_error["train"] += [np.mean(train_abs_error)]
 
             if epoch % self.epochs_per_print == 0:
-                print("Epoch: {}:\t"
-                      "Train Loss: {:.5f} , "
-                      "kld: {:.3f} , "
-                      "recon: {:.3f}"
-                      .format(epoch,
-                              losses["train"][-1],
-                              kl_divs["train"][-1],
-                              losses_recon["train"][-1])
-                      )
+                if self.verbose > 1:
+                    print("Epoch: {}:\t"
+                          "Train Loss: {:.5f} , "
+                          "kld: {:.3f} , "
+                          "recon: {:.3f}"
+                          .format(epoch,
+                                  losses["train"][-1],
+                                  kl_divs["train"][-1],
+                                  losses_recon["train"][-1])
+                          )
 
             if np.isnan(losses["train"][-1]):
-                print('PREMATURE RETURN...')
+                if self.verbose > 0:
+                    print('PREMATURE RETURN...')
                 return best_loss
             model.eval()
             valid_losses = []
@@ -500,7 +542,8 @@ class Train:
             # generalisation
             mode = 'train'
             if losses[mode][-1] < best_loss or best_loss == -1:
-                print('BEST EPOCH!', losses[mode][-1])
+                if self.verbose > 1:
+                    print('BEST EPOCH!', losses[mode][-1])
                 early_stop_counter = 0
                 best_loss = losses[mode][-1]
                 best_epoch = True
@@ -515,7 +558,8 @@ class Train:
                 img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
                 recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
                 if best_epoch and save:
-                    print('Saving model...')
+                    if self.verbose > 1:
+                        print('Saving model...')
                     save_checkpoint(model=model,
                                     optimizer=optimizer,
                                     maxpool=maxpool,
@@ -540,27 +584,32 @@ class Train:
                                     dilatations_deconv=self.dilatations_deconv,
                                     best_loss=best_loss,
                                     save=self.save,
-                                    name=self.modelname
+                                    name=self.modelname,
+                                    n_flows=n_flows,
+                                    flow_type=flow_type
                                     )
             if epoch % self.epochs_per_print == 0:
-                print("Epoch: {}:\t"
-                      "Valid Loss: {:.5f} , "
-                      "kld: {:.3f} , "
-                      "recon: {:.3f}"
-                      .format(epoch,
-                              losses["valid"][-1],
-                              kl_divs["valid"][-1],
-                              losses_recon["valid"][-1]
-                              )
-                      )
-                print("Current LR:", optimizer.param_groups[0]['lr'])
+                if self.verbose > 0:
+                    print("Epoch: {}:\t"
+                          "Valid Loss: {:.5f} , "
+                          "kld: {:.3f} , "
+                          "recon: {:.3f}"
+                          .format(epoch,
+                                  losses["valid"][-1],
+                                  kl_divs["valid"][-1],
+                                  losses_recon["valid"][-1]
+                                  )
+                          )
+                if self.verbose > 1:
+                    print("Current LR:", optimizer.param_groups[0]['lr'])
                 if 'momentum' in optimizer.param_groups[0].keys():
                     print("Current Momentum:", optimizer.param_groups[0]['momentum'])
             plot_performance(loss_total=losses, losses_recon=losses_recon, kl_divs=kl_divs, shapes=shapes,
                              results_path="../figures",
                              filename="training_loss_trace_"
                                       + self.modelname + '.jpg')
-        print('BEST LOSS :', best_loss)
+        if self.verbose > 0:
+            print('BEST LOSS :', best_loss)
         return best_loss
 
 
@@ -584,18 +633,18 @@ if __name__ == "__main__":
     paddings_deconv = [1, 1, 1, 1, 1, 1, 1]
     dilatations_deconv = [1, 1, 1, 1, 1, 1, 1]
     n_flows = 10
-    bs = 6
+    bs = 18
     maxpool = 2
-    flow_type = 'nf'
+    flow_type = 'o-sylvester'
     epochs_per_checkpoint = 1
-    has_dense = False
+    has_dense = True
     batchnorm = True
     gated = False
     resblocks = True
     checkpoint_path = "checkpoints"
 
     n_epochs = 10000
-    save = True
+    save = False
     training = Train(in_channels,
                      out_channels,
                      kernel_sizes,
@@ -622,18 +671,19 @@ if __name__ == "__main__":
         parameters=[
             {"name": "warmup", "type": "choice", "values": [0, 0]},
             {"name": "mom_range", "type": "choice", "values": [0, 0]},
-            {"name": "niter", "type": "range", "bounds": [10, 10000]},
-            {"name": "n_res", "type": "choice", "values": [20, 20]},
+            {"name": "num_elements", "type": "range", "bounds": [1, 5]},
+            {"name": "niter", "type": "choice", "values": [10, 10]},
+            {"name": "n_res", "type": "range", "bounds": [0, 10]},
             {"name": "z_dim", "type": "range", "bounds": [50, 256]},
-            {"name": "n_flows", "type": "choice", "values": [0, 10]},
+            {"name": "n_flows", "type": "range", "bounds": [2, 100]},
             {"name": "scheduler", "type": "choice", "values":
                 ['ReduceLROnPlateau', 'ReduceLROnPlateau']},
             {"name": "optimizer", "type": "choice", "values": ['rmsprop', 'rmsprop']},
             {"name": "l1", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
-            {"name": "l2", "type": "range", "bounds":  [1e-14, 1e-1], "log_scale": True},
+            {"name": "l2", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "momentum", "type": "range", "bounds": [0.9, 1.]},
-            {"name": "learning_rate", "type": "range", "bounds": [1e-5, 1e-3], "log_scale": True},
+            {"name": "learning_rate", "type": "range", "bounds": [1e-4, 1e-3], "log_scale": True},
         ],
         evaluation_function=training.train,
         objective_name='loss',

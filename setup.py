@@ -21,6 +21,12 @@ setup(name="fmri", version="0.2",
                         'scipy',
                         'tensorboardX',
                         'Unidecode',
+                        'nibabel',
+                        'nilearn'
+                        'tqdm',
+                        'torchvision',
+                        'ax-platform',
+                        'ax'
                         # 'apex'
                         ]
       )

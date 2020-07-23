@@ -5,6 +5,7 @@ import numpy as np
 from torch.utils.data import Dataset
 import nibabel as nib
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
+from fmri.models.unsupervised.SylvesterVAE3DCNN import SylvesterVAE
 
 
 def _resize_data(data, new_size=(160, 160, 160)):
@@ -70,7 +71,12 @@ def load_checkpoint(checkpoint_path,
                     dilatations,
                     dilatations_deconv,
                     batchnorm,
+                    flow_type,
                     save,
+                    n_flows,
+                    n_res,
+                    resblocks,
+                    h_last,
                     name="vae_1dcnn"):
     # if checkpoint_path
     losses_recon = {
@@ -90,9 +96,12 @@ def load_checkpoint(checkpoint_path,
     if name not in os.listdir(checkpoint_path):
         print("Creating checkpoint...")
         if save:
-            save_checkpoint(model, optimizer, maxpool,
+            save_checkpoint(model,
+                            optimizer,
+                            maxpool,
                             padding,
                             padding_deconv,
+                            flow_type=flow_type,
                             save=save,
                             learning_rate=None,
                             has_dense=has_dense,
@@ -112,11 +121,16 @@ def load_checkpoint(checkpoint_path,
                             dilatations=dilatations,
                             dilatations_deconv=dilatations_deconv,
                             batchnorm=batchnorm,
-                            name=name)
+                            name=name,
+                            n_flows=n_flows,
+                            n_res=n_res,
+                            resblocks=resblocks,
+                            h_last=h_last,
+                            )
     checkpoint_dict = torch.load(checkpoint_path + '/' + name, map_location='cpu')
     epoch = checkpoint_dict['epoch']
     best_loss = checkpoint_dict['best_loss']
-    optimizer.load_state_dict(checkpoint_dict['optimizer'])
+    # optimizer.load_state_dict(checkpoint_dict['optimizer'])
     model_for_loading = checkpoint_dict['model']
     model.load_state_dict(model_for_loading.state_dict())
     losses_recon = checkpoint_dict['losses_recon']
@@ -150,28 +164,64 @@ def save_checkpoint(model,
                     dilatations_deconv,
                     batchnorm,
                     save,
+                    n_flows,
+                    n_res,
+                    resblocks,
+                    h_last,
                     flow_type='vanilla',
                     best_loss=-1,
                     has_dense=True,
                     name="vae_1dcnn"):
-    model_for_saving = Autoencoder3DCNN(maxpool=maxpool,
-                                        padding=padding,
-                                        batchnorm=batchnorm,
-                                        padding_deconv=padding_deconv,
-                                        flow_type=flow_type,
-                                        has_dense=has_dense,
-                                        n_flows=10,
-                                        z_dim=z_dim,
-                                        gated=gated,
-                                        in_channels=in_channels,
-                                        out_channels=out_channels,
-                                        kernel_sizes=kernel_sizes,
-                                        kernel_sizes_deconv=kernel_sizes_deconv,
-                                        strides=strides,
-                                        strides_deconv=strides_deconv,
-                                        dilatations=dilatations,
-                                        dilatations_deconv=dilatations_deconv
+    if not save:
+        return
+    if flow_type != 'o-sylvester':
+        model_for_saving = Autoencoder3DCNN(maxpool=maxpool,
+                                            padding=padding,
+                                            batchnorm=batchnorm,
+                                            padding_deconv=padding_deconv,
+                                            flow_type=flow_type,
+                                            has_dense=has_dense,
+                                            n_flows=n_flows,
+                                            z_dim=z_dim,
+                                            n_res=n_res,
+                                            resblocks=resblocks,
+                                            h_last=h_last,
+                                            gated=gated,
+                                            in_channels=in_channels,
+                                            out_channels=out_channels,
+                                            kernel_sizes=kernel_sizes,
+                                            kernel_sizes_deconv=kernel_sizes_deconv,
+                                            strides=strides,
+                                            strides_deconv=strides_deconv,
+                                            dilatations=dilatations,
+                                            dilatations_deconv=dilatations_deconv,
+                                            ).cuda()
+    else:
+        model_for_saving = SylvesterVAE(z_dim,
+                                        maxpool,
+                                        in_channels,
+                                        out_channels,
+                                        kernel_sizes,
+                                        kernel_sizes_deconv,
+                                        strides,
+                                        strides_deconv,
+                                        dilatations,
+                                        dilatations_deconv,
+                                        padding,
+                                        padding_deconv,
+                                        batchnorm,
+                                        flow_type,
+                                        n_res,
+                                        gated,
+                                        has_dense,
+                                        resblocks,
+                                        h_last,
+                                        n_flows,
+                                        num_elements=3,
+                                        auxiliary=False,
+                                        a_dim=0
                                         ).cuda()
+
     model_for_saving.load_state_dict(model.state_dict())
     torch.save({'model': model_for_saving,
                 'losses': losses,
@@ -181,4 +231,3 @@ def save_checkpoint(model,
                 'epoch': epoch,
                 'optimizer': optimizer.state_dict(),
                 'learning_rate': learning_rate}, checkpoint_path + '/' + name)
-

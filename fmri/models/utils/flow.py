@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
-from fmri.models.utils.masked_layer import MaskedConv2d, MaskedLinear
+from fmri.models.utils.masked_layer import MaskedConv3d, MaskedLinear
 
 
 class PlanarNormalizingFlow(nn.Module):
@@ -145,7 +145,6 @@ class HouseholderFlow(nn.Module):
         self.n_flows = n_flows
         self.flow_type = "hf"
         flows = []
-        print("Auxiliary Householderflow", auxiliary)
         for i, features in enumerate(reversed(in_features)):
             flows += [flow_type().cuda()]
             v_layers = [nn.Linear(h_last_dim, features)] + [nn.Linear(features, features) for _ in range(n_flows)]
@@ -155,32 +154,31 @@ class HouseholderFlow(nn.Module):
         else:
             self.flows_a = nn.ModuleList(flows)
 
-    def forward(self, z, k, h_last, auxiliary=False):
+    def forward(self, z, h_last, auxiliary=False):
         self.cuda()
         v = {}
         z = {'0': z, '1': None}
         # Householder Flow:
         if self.n_flows > 0:
-            v['1'] = self.v_layers[k][0].cuda()(h_last)
+            v['1'] = self.v_layers[0][0].cuda()(h_last)
             if not auxiliary:
-                z['1'] = self.flows[k](v['1'], z['0'])
+                z['1'] = self.flows[0](v['1'], z['0'])
             else:
-                z['1'] = self.flows_a[k](v['1'], z['0'])
+                z['1'] = self.flows_a[0](v['1'], z['0'])
 
             for j in range(1, self.n_flows):
-                v[str(j + 1)] = self.v_layers[k][j].cuda()(v[str(j)])
+                v[str(j + 1)] = self.v_layers[0][j].cuda()(v[str(j)])
                 if not auxiliary:
-                    z[str(j + 1)] = self.flows[k](v[str(j + 1)], z[str(j)])
+                    z[str(j + 1)] = self.flows[0](v[str(j + 1)], z[str(j)])
                 else:
-                    z[str(j + 1)] = self.flows_a[k](v[str(j + 1)], z[str(j)])
+                    z[str(j + 1)] = self.flows_a[0](v[str(j + 1)], z[str(j)])
 
         return z[str(j + 1)]
 
 
 class ccLinIAF(nn.Module):
-    def __init__(self, in_features, auxiliary, flow_type=linIAF, n_flows=1, h_last_dim=None, flow_flavour="ccLinIAF"):
+    def __init__(self, in_features, n_flows=1, h_last_dim=None, flow_flavour="ccLinIAF", auxiliary=False, flow_type=linIAF):
         super().__init__()
-        print("Initialiation ccLinIAF with", n_flows, "number of combinations")
         self.n_combination = n_flows
         self.n_flows = n_flows
         self.flow_flavour = flow_flavour
@@ -207,7 +205,7 @@ class ccLinIAF(nn.Module):
 
         self.cuda()
 
-    def forward(self, z, k, h_last, auxiliary):
+    def forward(self, z, h_last, auxiliary=False, k=0):
         z = {'0': z, '1': None}
         if not auxiliary:
             l = self.encoder_L[k](h_last)
@@ -390,17 +388,17 @@ class IAF(nn.Module):
      Note that the size of h needs to be the same as h_size, which is the width of the MADE layers.
      """
 
-    def __init__(self, z_size, n_flows=2, num_hidden=0, h_size=50, forget_bias=1., conv2d=False):
+    def __init__(self, z_size, n_flows=2, num_hidden=0, h_size=50, forget_bias=1., conv3d=False):
         super(IAF, self).__init__()
         self.z_size = z_size
         self.n_flows = n_flows
         self.num_hidden = num_hidden
         self.tanh_size = h_size
-        self.conv2d = conv2d
-        if not conv2d:
+        self.conv3d = conv3d
+        if not conv3d:
             ar_layer = MaskedLinear
         else:
-            ar_layer = MaskedConv2d
+            ar_layer = MaskedConv3d
         self.activation = torch.nn.ELU
         # self.activation = torch.nn.ReLU
 
@@ -435,11 +433,11 @@ class IAF(nn.Module):
 
         self.param_list = torch.nn.ParameterList(self.param_list)
 
-    def forward(self, z, h_context, auxiliary):
+    def forward(self, z, h_context):
 
         logdets = 0.
         for i, flow in enumerate(self.flows):
-            if (i + 1) % 2 == 0 and not self.conv2d:
+            if (i + 1) % 2 == 0 and not self.conv3d:
                 # reverse ordering to help mixing
                 z = z[:, self.flip_idx]
 
@@ -447,14 +445,14 @@ class IAF(nn.Module):
             h = h + h_context
             h = flow[1](h)
             mean = flow[2](h)
-            gate = F.sigmoid(flow[3](h) + self.forget_bias)
+            gate = torch.sigmoid(flow[3](h) + self.forget_bias)
             z = gate * z + (1 - gate) * mean
             logdets += torch.sum(gate.log().view(gate.size(0), -1), 1)
         return z, logdets
 
 
 class SylvesterFlows(nn.Module):
-    def __init__(self, in_features, auxiliary, flow_flavour, n_flows=1, flow_type=Sylvester, h_last_dim=None):
+    def __init__(self, in_features, flow_flavour, n_flows=1, h_last_dim=None, flow_type=Sylvester, auxiliary=None):
         super(SylvesterFlows, self).__init__()
         self.flows = []
         self.h_last_dim = h_last_dim
@@ -470,7 +468,7 @@ class SylvesterFlows(nn.Module):
                 flow_k = flow_type(self.n_flows)
                 self.add_module('flow_' + str(k) + "_" + str(i) + "_" + str(auxiliary), flow_k)
 
-    def forward(self, z, r1, r2, q_ortho, b, k, auxiliary):
+    def forward(self, z, r1, r2, q_ortho, b, k=0, auxiliary=False):
         for i in range(self.n_flows):
             flow_name = 'flow_' + str(k) + "_" + str(i) + "_" + str(auxiliary)
             flow_k = getattr(self, flow_name)

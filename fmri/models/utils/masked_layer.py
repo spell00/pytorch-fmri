@@ -20,7 +20,7 @@ class GatedConv2d(nn.Module):
         super(GatedConv2d, self).__init__()
 
         self.activation = activation
-        self.sigmoid = nn.Sigmoid()
+        self.sigmoid = torch.sigmoid
 
         self.h = nn.Conv2d(input_channels, output_channels, kernel_size, stride, padding, dilation)
         self.g = nn.Conv2d(input_channels, output_channels, kernel_size, stride, padding, dilation)
@@ -42,7 +42,7 @@ class GatedConvTranspose2d(nn.Module):
         super(GatedConvTranspose2d, self).__init__()
 
         self.activation = activation
-        self.sigmoid = nn.Sigmoid()
+        self.sigmoid = torch.sigmoid
 
         self.h = nn.ConvTranspose2d(input_channels, output_channels, kernel_size, stride, padding, output_padding,
                                     dilation=dilation)
@@ -64,7 +64,7 @@ class GatedConv3d(nn.Module):
         super(GatedConv3d, self).__init__()
 
         self.activation = activation
-        self.sigmoid = nn.Sigmoid()
+        self.sigmoid = torch.sigmoid
 
         self.h = nn.Conv3d(input_channels, output_channels, kernel_size, stride, padding, dilation)
         self.g = nn.Conv3d(input_channels, output_channels, kernel_size, stride, padding, dilation)
@@ -86,7 +86,7 @@ class GatedConvTranspose3d(nn.Module):
         super(GatedConvTranspose3d, self).__init__()
 
         self.activation = activation
-        self.sigmoid = nn.Sigmoid()
+        self.sigmoid = torch.sigmoid
 
         self.h = nn.ConvTranspose3d(input_channels, output_channels, kernel_size, stride, padding, output_padding,
                                     dilation=dilation)
@@ -108,7 +108,7 @@ class GatedConv1d(nn.Module):
         super(GatedConv1d, self).__init__()
 
         self.activation = activation
-        self.sigmoid = nn.Sigmoid()
+        self.sigmoid = torch.sigmoid
 
         self.h = nn.Conv1d(in_channels, out_channels, kernel_size, stride, padding, dilation)
         self.g = nn.Conv1d(in_channels, out_channels, kernel_size, stride, padding, dilation)
@@ -130,7 +130,7 @@ class GatedConvTranspose1d(nn.Module):
         super(GatedConvTranspose1d, self).__init__()
 
         self.activation = activation
-        self.sigmoid = nn.Sigmoid()
+        self.sigmoid = torch.sigmoid
 
         self.h = nn.ConvTranspose1d(in_channels, out_channels, kernel_size, stride, padding, output_padding,
                                     dilation=dilation)
@@ -174,7 +174,7 @@ class MaskedLinear(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        nn.init.kaiming_normal(self.weight)
+        nn.init.kaiming_normal_(self.weight)
         if self.bias is not None:
             self.bias.data.zero_()
 
@@ -319,7 +319,7 @@ class MaskedConv3d(nn.Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        nn.init.kaiming_normal(self.weight)
+        nn.init.kaiming_normal_(self.weight)
         if self.bias is not None:
             self.bias.data.zero_()
 

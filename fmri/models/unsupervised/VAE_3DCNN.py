@@ -4,7 +4,7 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 from ..utils.distributions import log_gaussian, log_standard_gaussian
-from ..utils.flow import NormalizingFlows
+from ..utils.flow import NormalizingFlows, IAF, HouseholderFlow, ccLinIAF, SylvesterFlows, TriangularSylvester
 from ..utils.masked_layer import GatedConv3d, GatedConvTranspose3d
 
 in_channels = None
@@ -21,7 +21,7 @@ class Stochastic(nn.Module):
     parametrised by mu and log_var.
     """
 
-    def reparametrize(self, mu, log_var):
+    def reparameterize(self, mu, log_var):
         epsilon = Variable(torch.randn(mu.size()), requires_grad=False)
 
         if mu.is_cuda:
@@ -54,7 +54,7 @@ class GaussianSample(Stochastic):
         mu = self.mu(x)
         log_var = F.softplus(self.log_var(x))
 
-        return self.reparametrize(mu, log_var), mu, log_var
+        return self.reparameterize(mu, log_var), mu, log_var
 
 
 class ResBlock(nn.Module):
@@ -133,6 +133,7 @@ class Autoencoder3DCNN(torch.nn.Module):
         self.has_dense = has_dense
         self.batchnorm = batchnorm
         self.n_res = n_res
+        self.a_dim = None
         for i, (ins, outs, ksize, stride, dilats, pad) in enumerate(zip(in_channels, out_channels,
                                                          kernel_sizes, strides,
                                                          dilatations, padding)):
@@ -196,6 +197,14 @@ class Autoencoder3DCNN(torch.nn.Module):
         self.n_flows = n_flows
         if self.flow_type == "nf":
             self.flow = NormalizingFlows(in_features=[z_dim], n_flows=n_flows)
+        if self.flow_type == "hf":
+            self.flow = HouseholderFlow(in_features=[z_dim], auxiliary=False, n_flows=n_flows, h_last_dim=z_dim)
+        if self.flow_type == "iaf":
+            self.flow = IAF(z_dim, n_flows=n_flows, num_hidden=n_flows, h_size=z_dim, forget_bias=1., conv3d=False)
+        if self.flow_type == "ccliniaf":
+            self.flow = ccLinIAF(in_features=[z_dim], auxiliary=False, n_flows=n_flows, h_last_dim=z_dim)
+        if self.flow_type == "o-sylvester":
+            self.flow = SylvesterFlows(in_features=[z_dim], flow_flavour='o-sylvester', n_flows=1, h_last_dim=None)
 
     def random_init(self):
 
@@ -205,16 +214,37 @@ class Autoencoder3DCNN(torch.nn.Module):
                 if m.bias is not None:
                     m.bias.data.zero_()
 
-    def _kld(self, z, mu, log_var):
+    def _kld(self, z, q_param, h_last=None, p_param=None):
         if len(z.shape) == 1:
             z = z.view(1, -1)
-        if self.flow_type == "nf" and self.n_flows > 0:
+        if (self.flow_type == "nf") and self.n_flows > 0:
+            (mu, log_var) = q_param
             f_z, log_det_z = self.flow(z)
             qz = log_gaussian(z, mu, log_var) - sum(log_det_z)
             z = f_z
-        else:
+        elif (self.flow_type == "iaf") and self.n_flows > 0:
+            (mu, log_var) = q_param
+            f_z, log_det_z = self.flow(z, h_last)
+            qz = log_gaussian(z, mu, log_var) - sum(log_det_z)
+            z = f_z
+        elif (self.flow_type in ['hf', 'ccliniaf']) and self.n_flows > 0:
+            (mu, log_var) = q_param
+            f_z = self.flow(z, h_last)
             qz = log_gaussian(z, mu, log_var)
-        pz = log_standard_gaussian(z)
+            z = f_z
+        elif self.flow_type in ["o-sylvester", "h-sylvester", "t-sylvester"] and self.n_flows > 0:
+            mu, log_var, r1, r2, q_ortho, b = q_param
+            f_z = self.flow(z, r1, r2, q_ortho, b)
+            qz = log_gaussian(z, mu, log_var)
+            z = f_z
+        else:
+            (mu, log_var) = q_param
+            qz = log_gaussian(z, mu, log_var)
+        if p_param is None:
+            pz = log_standard_gaussian(z)
+        else:
+            (mu, log_var) = p_param
+            pz = log_gaussian(z, mu, log_var)
 
         kl = qz - pz
 
@@ -288,7 +318,7 @@ class Autoencoder3DCNN(torch.nn.Module):
         z, mu, log_var = self.GaussianSample(x)
 
         # Kullback-Leibler Divergence
-        kl = self._kld(z, mu, log_var)
+        kl = self._kld(z, (mu, log_var), x)
 
         if len(z.shape) == 1:
             z = z.unsqueeze(0)
