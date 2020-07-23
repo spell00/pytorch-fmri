@@ -126,6 +126,8 @@ class Train:
                  save,
                  padding,
                  padding_deconv,
+                 train_path,
+                 valid_path,
                  num_elements=0,
                  batch_size=8,
                  epochs=1000,
@@ -139,7 +141,8 @@ class Train:
                  resblocks=False,
                  flow_type='vanilla',
                  maxpool=3,
-                 verbose=2
+                 verbose=2,
+                 size=32
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -167,6 +170,9 @@ class Train:
         self.num_elements = num_elements
         self.save = save
         self.verbose = verbose
+        self.train_path = train_path
+        self.valid_path = valid_path
+        self.size = size
 
     def train(self, params):
         num_elements = params['num_elements']
@@ -206,23 +212,23 @@ class Train:
                   )
 
         self.modelname = "vae_3dcnn_" \
-                         + '_flows' + flow_type + str(n_flows) \
-                         + '_bn' + str(batchnorm) \
+                         + '_flows' + self.flow_type + str(n_flows) \
+                         + '_bn' + str(self.batchnorm) \
                          + '_niter' + str(niter) \
                          + '_nres' + str(n_res) \
                          + '_momrange' + str(mom_range) \
                          + '_momentum' + str(momentum) \
                          + '_' + str(optimizer_type) \
                          + "_zdim" + str(z_dim) \
-                         + '_gated' + str(gated) \
-                         + '_resblocks' + str(resblocks) \
+                         + '_gated' + str(self.gated) \
+                         + '_resblocks' + str(self.resblocks) \
                          + '_initlr' + learning_rate.__format__('e') \
                          + '_warmup' + str(warmup) \
                          + '_wd' + weight_decay.__format__('e') \
                          + '_l1' + l1.__format__('e') \
                          + '_l2' + l2.__format__('e') \
-                         + '_size' + str(size)
-        if flow_type != 'o-sylvester':
+                         + '_size' + str(self.size)
+        if self.flow_type != 'o-sylvester':
             model = Autoencoder3DCNN(z_dim,
                                      self.maxpool,
                                      self.in_channels,
@@ -263,7 +269,7 @@ class Train:
                                  has_dense=self.has_dense,
                                  resblocks=self.resblocks,
                                  h_last=z_dim,
-                                 n_flows=self.n_flows,
+                                 n_flows=n_flows,
                                  num_elements=3,
                                  auxiliary=False,
                                  a_dim=0,
@@ -295,7 +301,7 @@ class Train:
         # Load checkpoint if one exists
         epoch = 0
         best_loss = -1
-        if checkpoint_path is not None and save:
+        if self.checkpoint_path is not None and self.save:
             model, optimizer, \
             epoch, losses, \
             kl_divs, losses_recon, \
@@ -306,7 +312,7 @@ class Train:
                                         padding=self.padding,
                                         has_dense=self.has_dense,
                                         batchnorm=self.batchnorm,
-                                        flow_type=flow_type,
+                                        flow_type=self.flow_type,
                                         padding_deconv=self.padding_deconv,
                                         optimizer=optimizer,
                                         z_dim=z_dim,
@@ -329,10 +335,6 @@ class Train:
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
 
-        basedir = '/media/simon/DATA&STUFF/data/biology/images/t1/'
-        train_path = basedir + 'train_33x33/'
-        valid_path = basedir + 'valid_33x33/'
-
         train_transform = transforms.Compose([
             XFlip(),
             YFlip(),
@@ -347,8 +349,8 @@ class Train:
             torchvision.transforms.Normalize(mean=(0.15), std=(0.18)),
             Normalize()
         ])
-        train_set = MRIDataset(train_path, transform=train_transform)
-        valid_set = MRIDataset(valid_path, transform=valid_transform)
+        train_set = MRIDataset(self.train_path, transform=train_transform)
+        valid_set = MRIDataset(self.valid_path, transform=valid_transform)
 
         train_loader = DataLoader(train_set, num_workers=0,
                                   shuffle=True,
@@ -550,14 +552,14 @@ class Train:
             else:
                 early_stop_counter += 1
 
-            if epoch % epochs_per_checkpoint == 0:
+            if epoch % self.epochs_per_checkpoint == 0:
                 img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
                 recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
                 if 'views' not in os.listdir():
                     os.mkdir('views')
                 img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
                 recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
-                if best_epoch and save:
+                if best_epoch and self.save:
                     if self.verbose > 1:
                         print('Saving model...')
                     save_checkpoint(model=model,
@@ -586,7 +588,7 @@ class Train:
                                     save=self.save,
                                     name=self.modelname,
                                     n_flows=n_flows,
-                                    flow_type=flow_type
+                                    flow_type=self.flow_type
                                     )
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 0:
@@ -642,17 +644,22 @@ if __name__ == "__main__":
     gated = False
     resblocks = True
     checkpoint_path = "checkpoints"
+    basedir = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
+    train_path = basedir + 'train_33x33/'
+    valid_path = basedir + 'valid_33x33/'
 
     n_epochs = 10000
     save = False
-    training = Train(in_channels,
-                     out_channels,
-                     kernel_sizes,
-                     kernel_sizes_deconv,
-                     strides,
-                     strides_deconv,
-                     dilatations,
-                     dilatations_deconv,
+    training = Train(in_channels=in_channels,
+                     out_channels=out_channels,
+                     kernel_sizes=kernel_sizes,
+                     kernel_sizes_deconv=kernel_sizes_deconv,
+                     strides=strides,
+                     strides_deconv=strides_deconv,
+                     dilatations=dilatations,
+                     dilatations_deconv=dilatations_deconv,
+                     train_path=train_path,
+                     valid_path=valid_path,
                      padding=paddings,
                      padding_deconv=paddings_deconv,
                      batch_size=bs,
@@ -665,7 +672,7 @@ if __name__ == "__main__":
                      batchnorm=batchnorm,
                      flow_type=flow_type,
                      save=save,
-                     maxpool=maxpool
+                     maxpool=maxpool,
                      )
     best_parameters, values, experiment, model = optimize(
         parameters=[
@@ -701,87 +708,3 @@ if __name__ == "__main__":
 
     # cv_results = cross_validate(model)
     # render(interact_cross_validation(cv_results))
-
-"""
-z_dim = 256
-in_channels =        [1,  16, 32, 64,  128, 256,   z_dim]
-out_channels =       [16, 32, 64, 128, 256, z_dim, z_dim]
-kernel_sizes =       [3,   3, 3,  3,   3,   3,     3]
-strides =            [1,   1, 1,  1,   1,   1,     1]
-dilatations =        [1,   1, 1,  1,   1,   1,     1]
-paddings =           [2,   2, 2,  2,   2,   2,     1]
-dilatations_deconv = [1,   1, 1,  1,   1,   1,     1]
-n_flows = 0
-n_epochs = 100000
-bs = 1
-maxpool = 2
-
-z_dim = 256
-in_channels =        [1,  128,  256, z_dim]
-out_channels =       [128, 256, z_dim, z_dim]
-kernel_sizes =       [3,  3,   3,   3]
-strides =            [1,  1,   1,   1]
-dilatations =        [1,  1,   1,   1]
-paddings =           [2,  2,   2,   2]
-dilatations_deconv = [1,  1,   1,   1]
-n_flows = 1
-n_epochs = 100000
-bs = 4
-maxpool = 3
-
-size = 33
-z_dim = 100
-in_channels =        [1,  128,  256, z_dim]
-out_channels =       [128, 256, z_dim, z_dim]
-kernel_sizes =       [3,  3,   3,   3]
-kernel_sizes_deconv =       [3,  3,   3,   3]
-strides =            [1,  1,   1,   1]
-strides_deconv =            [1,  1,   1,   1]
-dilatations =        [1,  1,   1,   1]
-paddings =           [2,  2,   2,   2]
-paddings_deconv =    [1,  1,   1,   1]
-dilatations_deconv = [1,  1,   1,   1]
-n_flows = 10
-n_epochs = 100000
-bs = 4
-maxpool = 3
-flow_type = 'nf'
-epochs_per_checkpoint = 1
-gated = False
-resblocks = True
-checkpoint_path = "checkpoints/"
-
-"""
-
-"""
-train(name,
-z_dim,
-in_channels,
-out_channels,
-kernel_sizes,
-kernel_sizes_deconv,
-strides,
-strides_deconv,
-dilatations,
-dilatations_deconv,
-padding=paddings,
-padding_deconv=paddings_deconv,
-batch_size=bs,
-epochs=n_epochs,
-checkpoint_path=checkpoint_path,
-epochs_per_checkpoint=epochs_per_checkpoint,
-gated=gated,
-resblocks=resblocks,
-n_flows=n_flows,
-fp16_run=False,
-batchnorm=batchnorm,
-flow_type=flow_type,
-learning_rate=1e-3,
-maxpool=maxpool,
-weight_decay=0,
-warmup=0,
-l1=0,
-l2=0
-)
-
-"""
