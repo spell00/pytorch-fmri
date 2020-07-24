@@ -81,13 +81,13 @@ class GaussianSample(Stochastic):
 
 
 class ResBlock(nn.Module):
-    def __init__(self, in_channel, channel):
+    def __init__(self, in_channel, channel, activation):
         super().__init__()
 
         self.conv = nn.Sequential(
-            nn.GELU(),
+            activation(),
             nn.Conv3d(in_channel, channel, 3, padding=1),
-            nn.GELU(),
+            activation(),
             nn.Conv3d(channel, in_channel, 1),
         )
 
@@ -99,13 +99,13 @@ class ResBlock(nn.Module):
 
 
 class ResBlockDeconv(nn.Module):
-    def __init__(self, in_channel, channel):
+    def __init__(self, in_channel, channel, activation):
         super().__init__()
 
         self.conv = nn.Sequential(
-            nn.GELU(),
+            activation(),
             nn.ConvTranspose3d(in_channel, channel, 1),
-            nn.GELU(),
+            activation(),
             nn.ConvTranspose3d(channel, in_channel, 3, padding=1),
         )
 
@@ -131,6 +131,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                  padding,
                  padding_deconv,
                  batchnorm,
+                 activation,
                  flow_type="nf",
                  n_flows=2,
                  n_res=3,
@@ -147,7 +148,7 @@ class Autoencoder3DCNN(torch.nn.Module):
         self.bns_deconv = []
         self.indices = [torch.Tensor() for _ in range(len(in_channels))]
         self.GaussianSample = GaussianSample(z_dim, z_dim)
-        self.activation = torch.nn.GELU()
+        self.activation = activation()
         # self.swish = Swish()
 
         self.n_res = n_res
@@ -156,9 +157,12 @@ class Autoencoder3DCNN(torch.nn.Module):
         self.has_dense = has_dense
         self.batchnorm = batchnorm
         self.a_dim = None
-        for i, (ins, outs, ksize, stride, dilats, pad) in enumerate(zip(in_channels, out_channels,
-                                                                        kernel_sizes, strides,
-                                                                        dilatations, padding)):
+        for i, (ins, outs, ksize, stride, dilats, pad) in enumerate(zip(in_channels,
+                                                                        out_channels,
+                                                                        kernel_sizes,
+                                                                        strides,
+                                                                        dilatations,
+                                                                        padding)):
             if not gated:
                 self.conv_layers += [
                     torch.nn.Conv3d(in_channels=ins,
@@ -181,7 +185,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                 )]
             if resblocks and i != 0:
                 for _ in range(n_res):
-                    self.resconv += [ResBlock(ins, outs)]
+                    self.resconv += [ResBlock(ins, outs, activation)]
             self.bns += [nn.BatchNorm3d(num_features=outs)]
 
         for i, (ins, outs, ksize, stride, dilats, pad) in enumerate(zip(reversed(out_channels),
@@ -191,18 +195,24 @@ class Autoencoder3DCNN(torch.nn.Module):
                                                                         dilatations_deconv,
                                                                         padding_deconv)):
             if not gated:
-                self.deconv_layers += [torch.nn.ConvTranspose3d(in_channels=ins, out_channels=outs,
-                                                                kernel_size=ksize, padding=pad, stride=stride,
+                self.deconv_layers += [torch.nn.ConvTranspose3d(in_channels=ins,
+                                                                out_channels=outs,
+                                                                kernel_size=ksize,
+                                                                padding=pad,
+                                                                stride=stride,
                                                                 dilation=dilats)]
             else:
-                self.deconv_layers += [GatedConvTranspose3d(input_channels=ins, output_channels=outs,
+                self.deconv_layers += [GatedConvTranspose3d(input_channels=ins,
+                                                            output_channels=outs,
                                                             kernel_size=ksize,
-                                                            stride=stride, padding=pad, dilation=dilats,
+                                                            stride=stride,
+                                                            padding=pad,
+                                                            dilation=dilats,
                                                             activation=nn.Tanh()
                                                             )]
             if resblocks and i != 0:
                 for _ in range(n_res):
-                    self.resdeconv += [ResBlockDeconv(ins, outs)]
+                    self.resdeconv += [ResBlockDeconv(ins, outs, activation)]
 
             self.bns_deconv += [nn.BatchNorm3d(num_features=outs)]
 

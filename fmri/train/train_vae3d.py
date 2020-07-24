@@ -146,7 +146,8 @@ class Train:
                  mean=0.5,
                  std=0.5,
                  plot_perform=True,
-                 val_share=0.1
+                 val_share=0.1,
+                 activation=torch.nn.GELU
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -180,6 +181,7 @@ class Train:
         self.mean = mean
         self.val_share = val_share
         self.plot_perform = plot_perform
+        self.activation = activation
 
     def train(self, params):
         num_elements = params['num_elements']
@@ -254,7 +256,8 @@ class Train:
                                      n_flows=n_flows,
                                      n_res=n_res,
                                      gated=self.gated,
-                                     resblocks=self.resblocks
+                                     resblocks=self.resblocks,
+                                     activation=self.activation
                                      ).cuda()
         else:
             model = SylvesterVAE(z_dim=z_dim,

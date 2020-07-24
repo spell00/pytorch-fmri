@@ -68,6 +68,7 @@ class SylvesterVAE(Autoencoder3DCNN):
                                            gated=gated,
                                            has_dense=has_dense,
                                            resblocks=resblocks,
+                                           activation=torch.nn.GELU
                                            )
         # Initialize log-det-jacobian to zero
         self.auxiliary = auxiliary
