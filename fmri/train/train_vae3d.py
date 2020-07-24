@@ -145,6 +145,7 @@ class Train:
                  size=32,
                  mean=0.107,
                  std=0.133,
+                 plot_perform=True
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -177,6 +178,7 @@ class Train:
         self.size = size
         self.std = std
         self.mean = mean
+        self.plot_perform = plot_perform
 
     def train(self, params):
         num_elements = params['num_elements']
@@ -613,7 +615,8 @@ class Train:
                     print("Current LR:", optimizer.param_groups[0]['lr'])
                 if 'momentum' in optimizer.param_groups[0].keys():
                     print("Current Momentum:", optimizer.param_groups[0]['momentum'])
-            plot_performance(loss_total=losses, losses_recon=losses_recon, kl_divs=kl_divs, shapes=shapes,
+            if self.plot_perform:
+                plot_performance(loss_total=losses, losses_recon=losses_recon, kl_divs=kl_divs, shapes=shapes,
                              results_path="../figures",
                              filename="training_loss_trace_"
                                       + self.modelname + '.jpg')
