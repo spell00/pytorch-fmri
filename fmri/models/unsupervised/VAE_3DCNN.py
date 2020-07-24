@@ -12,6 +12,29 @@ out_channels = None
 kernel_sizes = None
 strides = None
 
+def swish(x):
+    return x * x.sigmoid()
+
+
+def mish(x):
+    return x * F.softplus(x).tanh()
+
+
+class Swish(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return swish(x)
+
+
+class Mish(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return mish(x)
+
 
 class Stochastic(nn.Module):
     """
@@ -62,9 +85,9 @@ class ResBlock(nn.Module):
         super().__init__()
 
         self.conv = nn.Sequential(
-            nn.ReLU(inplace=True),
+            nn.GELU(),
             nn.Conv3d(in_channel, channel, 3, padding=1),
-            nn.ReLU(inplace=True),
+            nn.GELU(),
             nn.Conv3d(channel, in_channel, 1),
         )
 
@@ -80,9 +103,9 @@ class ResBlockDeconv(nn.Module):
         super().__init__()
 
         self.conv = nn.Sequential(
-            nn.ReLU(inplace=False),
+            nn.GELU(),
             nn.ConvTranspose3d(in_channel, channel, 1),
-            nn.ReLU(inplace=False),
+            nn.GELU(),
             nn.ConvTranspose3d(channel, in_channel, 3, padding=1),
         )
 
@@ -120,23 +143,22 @@ class Autoencoder3DCNN(torch.nn.Module):
         self.deconv_layers = []
         self.bns = []
         self.resconv = []
-        self.resconv1 = []
-        self.resconv2 = []
-        self.resblocks = resblocks
         self.resdeconv = []
-        self.resdeconv1 = []
-        self.resdeconv2 = []
         self.bns_deconv = []
         self.indices = [torch.Tensor() for _ in range(len(in_channels))]
         self.GaussianSample = GaussianSample(z_dim, z_dim)
-        self.relu = torch.nn.PReLU()
+        self.activation = torch.nn.GELU()
+        # self.swish = Swish()
+
+        self.n_res = n_res
+
+        self.resblocks = resblocks
         self.has_dense = has_dense
         self.batchnorm = batchnorm
-        self.n_res = n_res
         self.a_dim = None
         for i, (ins, outs, ksize, stride, dilats, pad) in enumerate(zip(in_channels, out_channels,
-                                                         kernel_sizes, strides,
-                                                         dilatations, padding)):
+                                                                        kernel_sizes, strides,
+                                                                        dilatations, padding)):
             if not gated:
                 self.conv_layers += [
                     torch.nn.Conv3d(in_channels=ins,
@@ -163,11 +185,11 @@ class Autoencoder3DCNN(torch.nn.Module):
             self.bns += [nn.BatchNorm3d(num_features=outs)]
 
         for i, (ins, outs, ksize, stride, dilats, pad) in enumerate(zip(reversed(out_channels),
-                                                         reversed(in_channels),
-                                                         kernel_sizes_deconv,
-                                                         strides_deconv,
-                                                         dilatations_deconv,
-                                                         padding_deconv)):
+                                                                        reversed(in_channels),
+                                                                        kernel_sizes_deconv,
+                                                                        strides_deconv,
+                                                                        dilatations_deconv,
+                                                                        padding_deconv)):
             if not gated:
                 self.deconv_layers += [torch.nn.ConvTranspose3d(in_channels=ins, out_channels=outs,
                                                                 kernel_size=ksize, padding=pad, stride=stride,
@@ -188,7 +210,7 @@ class Autoencoder3DCNN(torch.nn.Module):
         self.dense2 = torch.nn.Linear(in_features=z_dim, out_features=out_channels[-1])
         self.dense1_bn = nn.BatchNorm1d(num_features=z_dim)
         self.dense2_bn = nn.BatchNorm1d(num_features=out_channels[-1])
-        self.dropout = nn.Dropout(0.1)
+        self.dropout = nn.Dropout(0.5)
         self.maxpool = nn.MaxPool3d(maxpool, return_indices=True)
         self.maxunpool = nn.MaxUnpool3d(maxpool)
         self.conv_layers = nn.ModuleList(self.conv_layers)
@@ -257,21 +279,21 @@ class Autoencoder3DCNN(torch.nn.Module):
                 for _ in range(self.n_res):
                     if self.batchnorm:
                         if x.shape[0] != 1:
-                            x = self.bns[i-1](x)
+                            x = self.bns[i - 1](x)
                     x = self.resconv[j](x)
                     j += 1
             x = self.conv_layers[i](x)
             if self.batchnorm:
                 if x.shape[0] != 1:
                     x = self.bns[i].cuda()(x)
-            x = self.relu(x)
+            x = self.activation(x)
             x = self.dropout(x)
             x, self.indices[i] = self.maxpool(x)
 
         z = x.squeeze()
         if self.has_dense:
             z = self.dense1(z)
-            z = self.relu(z)
+            z = self.activation(z)
             if self.batchnorm:
                 if z.shape[0] != 1:
                     z = self.dense1_bn(z)
@@ -281,7 +303,7 @@ class Autoencoder3DCNN(torch.nn.Module):
     def decoder(self, z):
         if self.has_dense:
             z = self.dense2(z)
-            z = self.relu(z)
+            z = self.activation(z)
             if self.batchnorm:
                 if z.shape[0] != 1:
                     z = self.dense2_bn(z)
@@ -294,7 +316,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                 for _ in range(self.n_res):
                     if self.batchnorm:
                         if x.shape[0] != 1:
-                            x = self.bns_deconv[i-1].cuda()(x)
+                            x = self.bns_deconv[i - 1].cuda()(x)
                     x = self.resdeconv[j](x)
                     j += 1
             ind = self.indices[len(self.indices) - 1 - i]
@@ -303,8 +325,8 @@ class Autoencoder3DCNN(torch.nn.Module):
             if i < len(self.deconv_layers) - 1:
                 if self.batchnorm:
                     if x.shape[0] != 1:
-                       x = self.bns_deconv[i].cuda()(x)
-                x = self.relu(x)
+                        x = self.bns_deconv[i].cuda()(x)
+                x = self.activation(x)
                 x = self.dropout(x)
 
         if (len(x.shape) == 3):

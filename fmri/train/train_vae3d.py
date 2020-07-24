@@ -27,6 +27,7 @@ output_directory = "checkpoints"
 from torch.utils.data import Dataset
 import h5py
 import nibabel as nib
+from fmri.utils.utils import validation_split
 
 torch.cuda.set_device(device=0)
 
@@ -126,8 +127,7 @@ class Train:
                  save,
                  padding,
                  padding_deconv,
-                 train_path,
-                 valid_path,
+                 path,
                  num_elements=0,
                  batch_size=8,
                  epochs=1000,
@@ -143,9 +143,10 @@ class Train:
                  maxpool=3,
                  verbose=2,
                  size=32,
-                 mean=0.107,
-                 std=0.133,
-                 plot_perform=True
+                 mean=0.5,
+                 std=0.5,
+                 plot_perform=True,
+                 val_share=0.1
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -173,11 +174,11 @@ class Train:
         self.num_elements = num_elements
         self.save = save
         self.verbose = verbose
-        self.train_path = train_path
-        self.valid_path = valid_path
+        self.path = path
         self.size = size
         self.std = std
         self.mean = mean
+        self.val_share = val_share
         self.plot_perform = plot_perform
 
     def train(self, params):
@@ -351,19 +352,17 @@ class Train:
             torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
             Normalize()
         ])
-        valid_transform = transforms.Compose([
-            torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
-            Normalize()
-        ])
-        train_set = MRIDataset(self.train_path, transform=train_transform)
-        valid_set = MRIDataset(self.valid_path, transform=valid_transform)
+        all_set = MRIDataset(self.path, transform=train_transform)
+        train_set, valid_set = validation_split(all_set, val_share=self.val_share)
 
-        train_loader = DataLoader(train_set, num_workers=0,
+        train_loader = DataLoader(train_set,
+                                  num_workers=0,
                                   shuffle=True,
                                   batch_size=self.batch_size,
                                   pin_memory=False,
                                   drop_last=True)
-        valid_loader = DataLoader(valid_set, num_workers=0,
+        valid_loader = DataLoader(valid_set,
+                                  num_workers=0,
                                   shuffle=True,
                                   batch_size=2,
                                   pin_memory=False,
@@ -548,8 +547,8 @@ class Train:
                 lr_schedule.step(losses["valid"][-1])
             # should be valid, but train is ok to test if it can be done without caring about
             # generalisation
-            mode = 'train'
-            if losses[mode][-1] < best_loss or best_loss == -1:
+            mode = 'valid'
+            if (losses[mode][-1] < best_loss or best_loss == -1) and not np.isnan(losses[mode][-1]):
                 if self.verbose > 1:
                     print('BEST EPOCH!', losses[mode][-1])
                 early_stop_counter = 0
@@ -645,7 +644,7 @@ if __name__ == "__main__":
     paddings_deconv = [1, 1, 1, 1, 1, 1, 1]
     dilatations_deconv = [1, 1, 1, 1, 1, 1, 1]
     n_flows = 10
-    bs = 18
+    bs = 8
     maxpool = 2
     flow_type = 'o-sylvester'
     epochs_per_checkpoint = 1
@@ -655,8 +654,7 @@ if __name__ == "__main__":
     resblocks = True
     checkpoint_path = "checkpoints"
     basedir = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
-    train_path = basedir + 'train_33x33/'
-    valid_path = basedir + 'valid_33x33/'
+    path = basedir + '33x33/'
 
     n_epochs = 10000
     save = False
@@ -668,8 +666,7 @@ if __name__ == "__main__":
                      strides_deconv=strides_deconv,
                      dilatations=dilatations,
                      dilatations_deconv=dilatations_deconv,
-                     train_path=train_path,
-                     valid_path=valid_path,
+                     path=path,
                      padding=paddings,
                      padding_deconv=paddings_deconv,
                      batch_size=bs,
@@ -695,7 +692,7 @@ if __name__ == "__main__":
             {"name": "n_flows", "type": "range", "bounds": [2, 20]},
             {"name": "scheduler", "type": "choice", "values":
                 ['ReduceLROnPlateau', 'ReduceLROnPlateau']},
-            {"name": "optimizer", "type": "choice", "values": ['rmsprop', 'rmsprop']},
+            {"name": "optimizer", "type": "choice", "values": ['adamw', 'adamw']},
             {"name": "l1", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "l2", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
