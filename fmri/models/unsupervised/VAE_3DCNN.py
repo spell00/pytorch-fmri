@@ -87,7 +87,7 @@ class ResBlockDeconv(nn.Module):
         )
 
     def forward(self, input):
-        out = self.conv(input)
+        out = self.conv.cuda()(input)
         out += input
 
         return out
@@ -180,7 +180,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                                             )]
             if resblocks and i != 0:
                 for _ in range(n_res):
-                    self.resdeconv += [ResBlockDeconv(ins, outs).cuda()]
+                    self.resdeconv += [ResBlockDeconv(ins, outs)]
 
             self.bns_deconv += [nn.BatchNorm3d(num_features=outs)]
 
