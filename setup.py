@@ -24,6 +24,7 @@ setup(name="fmri", version="0.2",
                         'tqdm',
                         'torchvision',
                         'ax-platform',
+                        'tensorboardX'
                         # 'apex'
                         ]
       )
