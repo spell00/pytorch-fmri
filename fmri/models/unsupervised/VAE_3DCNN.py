@@ -12,6 +12,7 @@ out_channels = None
 kernel_sizes = None
 strides = None
 
+
 def swish(x):
     return x * x.sigmoid()
 
@@ -48,7 +49,7 @@ class Stochastic(nn.Module):
         epsilon = Variable(torch.randn(mu.size()), requires_grad=False)
 
         if mu.is_cuda:
-            epsilon = epsilon.cuda()
+            epsilon = epsilon
 
         # log_std = 0.5 * log_var
         # std = exp(log_std)
@@ -92,7 +93,7 @@ class ResBlock(nn.Module):
         )
 
     def forward(self, input):
-        out = self.conv.cuda()(input)
+        out = self.conv(input)
         out += input
 
         return out
@@ -110,13 +111,13 @@ class ResBlockDeconv(nn.Module):
         )
 
     def forward(self, input):
-        out = self.conv.cuda()(input)
+        out = self.conv(input)
         out += input
 
         return out
 
 
-class Autoencoder3DCNN(torch.nn.Module):
+class Autoencoder3DCNN(nn.Module):
     def __init__(self,
                  z_dim,
                  maxpool,
@@ -140,12 +141,8 @@ class Autoencoder3DCNN(torch.nn.Module):
                  resblocks=False,
                  ):
         super(Autoencoder3DCNN, self).__init__()
-        self.conv_layers = []
-        self.deconv_layers = []
-        self.bns = []
-        self.resconv = []
-        self.resdeconv = []
-        self.bns_deconv = []
+        self.resconv = nn.ModuleList()
+        self.resdeconv = nn.ModuleList()
         self.indices = [torch.Tensor() for _ in range(len(in_channels))]
         self.GaussianSample = GaussianSample(z_dim, z_dim)
         self.activation = activation()
@@ -163,30 +160,32 @@ class Autoencoder3DCNN(torch.nn.Module):
                                                                         strides,
                                                                         dilatations,
                                                                         padding)):
+            layers_list = []
             if not gated:
-                self.conv_layers += [
-                    torch.nn.Conv3d(in_channels=ins,
-                                    out_channels=outs,
-                                    kernel_size=ksize,
-                                    stride=stride,
-                                    padding=pad,
-                                    dilation=dilats,
-                                    )
+                layers_list += [
+                    nn.Conv3d(ins, outs, ksize, stride, pad, dilats),
+                    nn.BatchNorm3d(num_features=outs),
+                    activation(),
+                    nn.Dropout3d(0.5),
                 ]
             else:
-                self.conv_layers += [
-                    GatedConv3d(input_channels=ins,
-                                output_channels=outs,
-                                kernel_size=ksize,
-                                stride=stride,
-                                padding=pad,
-                                dilation=dilats,
-                                activation=nn.Tanh()
-                                )]
-            if resblocks and i != 0:
+                layers_list += [
+                    GatedConv3d(ins, outs, ksize, stride, pad, dilats, nn.Tanh()),
+                    nn.BatchNorm3d(num_features=outs),
+                    activation(),
+                    nn.Dropout3d(0.5),
+                    nn.MaxPool3d(maxpool, return_indices=False)
+                ]
+            if resblocks and i < len(in_channels) - 1:
                 for _ in range(n_res):
-                    self.resconv += [ResBlock(ins, outs, activation)]
-            self.bns += [nn.BatchNorm3d(num_features=outs)]
+                    layers_list += [
+                        ResBlock(outs, outs, activation),
+                        nn.BatchNorm3d(num_features=outs),
+                        activation(),
+                        nn.Dropout3d(0.5)
+                    ]
+
+            self.resconv += [nn.Sequential(*layers_list)]
 
         for i, (ins, outs, ksize, stride, dilats, pad) in enumerate(zip(reversed(out_channels),
                                                                         reversed(in_channels),
@@ -194,37 +193,45 @@ class Autoencoder3DCNN(torch.nn.Module):
                                                                         strides_deconv,
                                                                         dilatations_deconv,
                                                                         padding_deconv)):
-            if not gated:
-                self.deconv_layers += [torch.nn.ConvTranspose3d(in_channels=ins,
-                                                                out_channels=outs,
-                                                                kernel_size=ksize,
-                                                                padding=pad,
-                                                                stride=stride,
-                                                                dilation=dilats)]
-            else:
-                self.deconv_layers += [GatedConvTranspose3d(input_channels=ins,
-                                                            output_channels=outs,
-                                                            kernel_size=ksize,
-                                                            stride=stride,
-                                                            padding=pad,
-                                                            dilation=dilats,
-                                                            activation=nn.Tanh()
-                                                            )]
+            layers_list = []
             if resblocks and i != 0:
                 for _ in range(n_res):
-                    self.resdeconv += [ResBlockDeconv(ins, outs, activation)]
+                    layers_list += [
+                        ResBlockDeconv(ins, outs, activation),
+                        nn.BatchNorm3d(num_features=outs),
+                        activation(),
+                        nn.Dropout3d(0.5)
+                    ]
+            if not gated:
+                layers_list += [nn.ConvTranspose3d(ins, outs, ksize, pad, stride, dilats),
+                                nn.BatchNorm3d(num_features=outs),
+                                activation(),
+                                nn.Dropout3d(0.5),
+                                nn.MaxUnpool3d(maxpool)
+                                ]
+            else:
+                layers_list += [GatedConvTranspose3d(ins, outs, ksize, stride, pad, dilats, nn.Tanh()),
+                                nn.BatchNorm3d(num_features=outs),
+                                activation(),
+                                nn.Dropout3d(0.5),
+                                nn.MaxUnpool3d(maxpool)
+                                ]
+            self.resdeconv += [nn.Sequential(*layers_list)]
 
-            self.bns_deconv += [nn.BatchNorm3d(num_features=outs)]
-
-        self.dense1 = torch.nn.Linear(in_features=out_channels[-1], out_features=z_dim)
-        self.dense2 = torch.nn.Linear(in_features=z_dim, out_features=out_channels[-1])
-        self.dense1_bn = nn.BatchNorm1d(num_features=z_dim)
-        self.dense2_bn = nn.BatchNorm1d(num_features=out_channels[-1])
-        self.dropout = nn.Dropout(0.5)
+        self.dense1 = nn.Sequential(
+            nn.Linear(in_features=out_channels[-1], out_features=z_dim),
+            nn.BatchNorm1d(num_features=z_dim),
+            activation(),
+            nn.Dropout(0.5)
+        )
+        self.dense2 = nn.Sequential(
+            nn.Linear(in_features=z_dim, out_features=out_channels[-1]),
+            nn.BatchNorm1d(num_features=out_channels[-1]),
+            activation(),
+            nn.Dropout(0.5)
+        )
         self.maxpool = nn.MaxPool3d(maxpool, return_indices=True)
         self.maxunpool = nn.MaxUnpool3d(maxpool)
-        self.conv_layers = nn.ModuleList(self.conv_layers)
-        self.deconv_layers = nn.ModuleList(self.deconv_layers)
         self.flow_type = flow_type
         self.n_flows = n_flows
         if self.flow_type == "nf":
@@ -238,11 +245,11 @@ class Autoencoder3DCNN(torch.nn.Module):
         if self.flow_type == "o-sylvester":
             self.flow = SylvesterFlows(in_features=[z_dim], flow_flavour='o-sylvester', n_flows=1, h_last_dim=None)
 
-    def random_init(self):
+    def random_init(self, func=nn.init.xavier_uniform_):
 
         for m in self.modules():
             if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
-                nn.init.xavier_uniform_(m.weight.data)
+                func(m.weight.data)
                 if m.bias is not None:
                     m.bias.data.zero_()
 
@@ -283,61 +290,22 @@ class Autoencoder3DCNN(torch.nn.Module):
         return kl
 
     def encoder(self, x):
-        j = 0
-        for i in range(len(self.conv_layers)):
-            if self.resblocks and i != 0:
-                for _ in range(self.n_res):
-                    if self.batchnorm:
-                        if x.shape[0] != 1:
-                            x = self.bns[i - 1](x)
-                    x = self.resconv[j](x)
-                    j += 1
-            x = self.conv_layers[i](x)
-            if self.batchnorm:
-                if x.shape[0] != 1:
-                    x = self.bns[i].cuda()(x)
-            x = self.activation(x)
-            x = self.dropout(x)
+        for i, resconv in enumerate(self.resconv):
+            x = resconv(x)
             x, self.indices[i] = self.maxpool(x)
-
         z = x.squeeze()
         if self.has_dense:
             z = self.dense1(z)
-            z = self.activation(z)
-            if self.batchnorm:
-                if z.shape[0] != 1:
-                    z = self.dense1_bn(z)
-            z = self.dropout(z)
         return z
 
     def decoder(self, z):
         if self.has_dense:
             z = self.dense2(z)
-            z = self.activation(z)
-            if self.batchnorm:
-                if z.shape[0] != 1:
-                    z = self.dense2_bn(z)
-            z = self.dropout(z)
 
-        j = 0
         x = z.unsqueeze(2).unsqueeze(3).unsqueeze(4)
-        for i in range(len(self.deconv_layers)):
-            if self.resblocks and i != 0:
-                for _ in range(self.n_res):
-                    if self.batchnorm:
-                        if x.shape[0] != 1:
-                            x = self.bns_deconv[i - 1].cuda()(x)
-                    x = self.resdeconv[j](x)
-                    j += 1
-            ind = self.indices[len(self.indices) - 1 - i]
-            x = self.maxunpool(x[:, :, :ind.shape[2], :ind.shape[3], :ind.shape[4]], ind)
-            x = self.deconv_layers[i](x)
-            if i < len(self.deconv_layers) - 1:
-                if self.batchnorm:
-                    if x.shape[0] != 1:
-                        x = self.bns_deconv[i].cuda()(x)
-                x = self.activation(x)
-                x = self.dropout(x)
+        for i, resdeconv in enumerate(self.resdeconv):
+            x = resdeconv(x)
+            x = self.maxunpool(x, self.indices[i])
 
         if (len(x.shape) == 3):
             x.unsqueeze(0)

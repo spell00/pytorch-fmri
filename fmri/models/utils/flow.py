@@ -79,8 +79,8 @@ class linIAF(nn.Module):
         lt_mask = torch.tril(torch.ones(self.z_dim, self.z_dim), -1)  # lower-triangular mask matrix (1s in lower triangular part)
         I = Variable(torch.eye(self.z_dim, self.z_dim).expand(l_matrix.size(0), self.z_dim, self.z_dim))
         if self.cuda:
-            lt_mask = lt_mask.cuda()
-            I = I.cuda()
+            lt_mask = lt_mask
+            I = I
         lt_mask = Variable(lt_mask)
         lt_mask = lt_mask.unsqueeze(0).expand(l_matrix.size(0), self.z_dim, self.z_dim)  # 1 x L x L -> B x L x L
         lt = torch.mul(l_matrix, lt_mask) + I  # here we get a batch of lower-triangular matrices with ones on diagonal
@@ -121,7 +121,7 @@ class NormalizingFlows(nn.Module):
         self.n_flows = n_flows
         self.flow_type = "nf"
         for i, features in enumerate(reversed(in_features)):
-            self.flows += [nn.ModuleList([flow_type(features).cuda() for _ in range(n_flows)])]
+            self.flows += [nn.ModuleList([flow_type(features) for _ in range(n_flows)])]
 
         super(NormalizingFlows, self).__init__()
 
@@ -146,7 +146,7 @@ class HouseholderFlow(nn.Module):
         self.flow_type = "hf"
         flows = []
         for i, features in enumerate(reversed(in_features)):
-            flows += [flow_type().cuda()]
+            flows += [flow_type()]
             v_layers = [nn.Linear(h_last_dim, features)] + [nn.Linear(features, features) for _ in range(n_flows)]
             self.v_layers[i] = nn.ModuleList(v_layers)
         if not auxiliary:
@@ -155,19 +155,19 @@ class HouseholderFlow(nn.Module):
             self.flows_a = nn.ModuleList(flows)
 
     def forward(self, z, h_last, auxiliary=False):
-        self.cuda()
+        self
         v = {}
         z = {'0': z, '1': None}
         # Householder Flow:
         if self.n_flows > 0:
-            v['1'] = self.v_layers[0][0].cuda()(h_last)
+            v['1'] = self.v_layers[0][0](h_last)
             if not auxiliary:
                 z['1'] = self.flows[0](v['1'], z['0'])
             else:
                 z['1'] = self.flows_a[0](v['1'], z['0'])
 
             for j in range(1, self.n_flows):
-                v[str(j + 1)] = self.v_layers[0][j].cuda()(v[str(j)])
+                v[str(j + 1)] = self.v_layers[0][j](v[str(j)])
                 if not auxiliary:
                     z[str(j + 1)] = self.flows[0](v[str(j + 1)], z[str(j)])
                 else:
@@ -188,7 +188,7 @@ class ccLinIAF(nn.Module):
         encoder_L = []
 
         for i, features in enumerate(list(reversed(in_features))):
-            flows += [flow_type(features).cuda()]
+            flows += [flow_type(features)]
             combination_l += [CombinationL(features, self.n_combination)]
             encoder_y += [nn.Linear(h_last_dim, self.n_combination)]
             encoder_L += [nn.Linear(h_last_dim, (features ** 2) * self.n_combination)]
@@ -203,7 +203,7 @@ class ccLinIAF(nn.Module):
             self.encoder_y_a = nn.ModuleList(encoder_y)
             self.encoder_L_a = nn.ModuleList(encoder_L)
 
-        self.cuda()
+        self
 
     def forward(self, z, h_last, auxiliary=False, k=0):
         z = {'0': z, '1': None}
@@ -425,10 +425,10 @@ class IAF(nn.Module):
             self.param_list += list(linear_std.parameters())
 
             if torch.cuda.is_available():
-                z_feats = z_feats.cuda()
-                zh_feats = zh_feats.cuda()
-                linear_mean = linear_mean.cuda()
-                linear_std = linear_std.cuda()
+                z_feats = z_feats
+                zh_feats = zh_feats
+                linear_mean = linear_mean
+                linear_std = linear_std
             self.flows.append((z_feats, zh_feats, linear_mean, linear_std))
 
         self.param_list = torch.nn.ParameterList(self.param_list)

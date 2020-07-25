@@ -25,11 +25,15 @@ import os
 
 output_directory = "checkpoints"
 from torch.utils.data import Dataset
+import nilearn as nl
 import h5py
 import nibabel as nib
 from fmri.utils.utils import validation_split
 
-torch.cuda.set_device(device=0)
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = 'cpu'
 
 
 def load_subject(filename, mask_img):
@@ -43,7 +47,6 @@ def load_subject(filename, mask_img):
     return subject_img
 
 
-import nilearn as nl
 
 
 class MRIDataset2(Dataset):
@@ -258,7 +261,7 @@ class Train:
                                      gated=self.gated,
                                      resblocks=self.resblocks,
                                      activation=self.activation
-                                     ).cuda()
+                                     ).to(device)
         else:
             model = SylvesterVAE(z_dim=z_dim,
                                  maxpool=self.maxpool,
@@ -341,7 +344,7 @@ class Train:
                                         resblocks=resblocks,
                                         h_last=self.out_channels[-1],
                                         )
-        model = model.cuda()
+        model = model.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
 
@@ -430,7 +433,7 @@ class Train:
                 #    pbar.update(1)
                 model.zero_grad()
                 images = batch
-                images = torch.autograd.Variable(images).cuda()
+                images = torch.autograd.Variable(images).to(device)
                 images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
                 reconstruct = reconstruct[:, :,
@@ -468,7 +471,7 @@ class Train:
                 train_recons += [loss_recon.item()]
                 train_abs_error += [
                     float(torch.mean(torch.abs_(
-                        reconstruct - images.cuda()
+                        reconstruct - images.to(device)
                     )).item())
                 ]
 
@@ -518,7 +521,7 @@ class Train:
             for i, batch in enumerate(valid_loader):
                 #    pbar.update(1)
                 images = batch
-                images = images.cuda()
+                images = images.to(device)
                 images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
                 reconstruct = reconstruct[:, :,
@@ -528,7 +531,7 @@ class Train:
                 images = images.squeeze(1)
                 loss_recon = criterion(
                     reconstruct,
-                    images.cuda()
+                    images.to(device)
                 ).sum()
                 kl_div = torch.mean(kl)
                 if epoch < warmup:
@@ -540,7 +543,7 @@ class Train:
                     return best_loss
                 valid_kld += [kl_div.item()]
                 valid_recons += [loss_recon.item()]
-                valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.cuda())).item())]
+                valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.to(device))).item())]
                 logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
             losses["valid"] += [np.mean(valid_losses)]
             kl_divs["valid"] += [np.mean(valid_kld)]
@@ -647,16 +650,16 @@ if __name__ == "__main__":
     paddings_deconv = [1, 1, 1, 1, 1, 1, 1]
     dilatations_deconv = [1, 1, 1, 1, 1, 1, 1]
     n_flows = 10
-    bs = 8
+    bs = 2
     maxpool = 2
-    flow_type = 'o-sylvester'
+    flow_type = 'hf'
     epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True
     gated = False
     resblocks = True
     checkpoint_path = "checkpoints"
-    basedir = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
+    basedir = '/Users/simonpelletier/Downloads/images3d/t1/'
     path = basedir + '33x33/'
 
     n_epochs = 10000
