@@ -286,8 +286,7 @@ class Train:
                                  num_elements=3,
                                  auxiliary=False,
                                  a_dim=0,
-
-                                 )
+                                 ).to(device)
         model.random_init()
         criterion = nn.MSELoss(reduction="none")
         if optimizer_type == 'adamw':
