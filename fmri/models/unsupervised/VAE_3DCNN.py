@@ -233,7 +233,7 @@ class Autoencoder3DCNN(torch.nn.Module):
             if resblocks and i < len(in_channels) - 1:
                 for _ in range(n_res):
                     layers_list += [
-                        ResBlockDeconv(ins, outs, activation),
+                        ResBlockDeconv(outs, outs, activation),
                         nn.BatchNorm3d(num_features=outs),
                         activation(),
                         nn.Dropout3d(0.5)
@@ -265,7 +265,7 @@ class Autoencoder3DCNN(torch.nn.Module):
         if self.flow_type == "o-sylvester":
             self.flow = SylvesterFlows(in_features=[z_dim], flow_flavour='o-sylvester', n_flows=1, h_last_dim=None)
 
-    def random_init(self, func=nn.init.xavier_uniform_):
+    def random_init(self, func=nn.init.kaiming_normal_):
 
         for m in self.modules():
             if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):

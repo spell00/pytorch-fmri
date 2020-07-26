@@ -637,8 +637,8 @@ if __name__ == "__main__":
 
     size = 32
     z_dim = 50
-    in_channels = [1, 128, 128, 128, 128]
-    out_channels = [128, 128, 128, 128, 128]
+    in_channels = [1, 64, 128, 128, 128]
+    out_channels = [64, 128, 128, 128, 128]
     kernel_sizes = [3, 3, 3, 3, 3]
     kernel_sizes_deconv = [3, 3, 3, 3, 3]
     strides = [1, 1, 1, 1, 1]
