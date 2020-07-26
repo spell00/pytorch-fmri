@@ -11,7 +11,6 @@ from fmri.utils.transform_3d import Normalize, Flip90, Flip180, Flip270, XFlip, 
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
 from fmri.models.unsupervised.SylvesterVAE3DCNN import SylvesterVAE
 from fmri.utils.plot_performance import plot_performance
-from torch.utils.data.dataset import random_split
 import torchvision
 from torchvision import transforms
 # from ax.plot.contour import plot_contour
@@ -48,75 +47,6 @@ def load_subject(filename, mask_img):
 
 
 
-
-class MRIDataset2(Dataset):
-    def __init__(self, imgs, fmri_mask, basepath, targets=None, transform=None):
-        self.path = basepath
-        self.samples = imgs
-        self.targets = targets
-        self.transform = transform
-        self.mask_img = nl.image.load_img(fmri_mask)
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        x = self.samples[idx]
-        x = torch.Tensor(load_subject(self.path + x, self.mask_img).dataobj)
-        if self.targets != None:
-            y = self.targets[idx]
-        else:
-            y = None
-        if self.transform:
-            x = self.transform(x)
-        return x
-
-
-def get_means_axis():
-    import os
-    import nibabel as nib
-    import itertools
-    path = '/run/media/simon/DATA&STUFF/data/biology/images/t1/train/'
-    size = 32
-    sum_imgs = torch.zeros([size, size, size])
-    max1 = 0
-    for x in os.listdir(path):
-        x = nib.load(path + x).dataobj
-        x = np.array(x)
-        x = torch.Tensor(_resize_data(x, (size, size, size)))
-        if torch.max(x) > max1:
-            max1 = torch.max(x)
-        sum_imgs += torch.Tensor(x)
-
-    avg_voxels = sum_imgs / len(os.listdir(path))
-    imgs_averages = torch.mean(avg_voxels)
-    return avg_voxels, imgs_averages
-
-
-def normalize_images(avg_voxels, imgs_averages):
-    path = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
-    size = 32
-    sum_imgs = torch.zeros([size, size, size])
-    for i, fname in enumerate(os.listdir(path + 'train/')):
-        print(i)
-        x = nib.load(path + 'train/' + fname).dataobj
-        x = np.array(x)
-        x = _resize_data(x, (size, size, size))
-        x = x / 1213.9487
-        sum_imgs += torch.Tensor(x)
-        img = nib.Nifti1Image(x, np.eye(4))
-        img.to_filename(path + 'train_66x66/' + fname + '.nii')
-    avg_voxels = sum_imgs / len(os.listdir(path))
-
-    for i, fname in enumerate(os.listdir(path + 'valid/')):
-        x = nib.load(path + 'valid/' + fname).dataobj
-        x = np.array(x)
-        x = _resize_data(x, (size, size, size))
-        x = x / 1213.9487
-        img = nib.Nifti1Image(x, np.eye(4))
-        img.to_filename(path + 'valid_66x66/' + fname + '.nii')
-
-
 class Train:
     def __init__(self,
                  in_channels,
@@ -150,7 +80,7 @@ class Train:
                  std=0.5,
                  plot_perform=True,
                  val_share=0.1,
-                 activation=torch.nn.GELU
+                 activation=torch.nn.ReLU
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -447,16 +377,16 @@ class Train:
                 ).sum() / self.batch_size
                 kl_div = torch.mean(kl)
                 loss = loss_recon + kl_div
-                l2_reg = torch.tensor(0.)
-                l1_reg = torch.tensor(0.)
+                l2_reg = torch.Tensor([0])
+                l1_reg = torch.Tensor([0])
                 for name, param in model.named_parameters():
                     if 'weight' in name:
                         l1_reg = l1 + torch.norm(param, 1)
                 for name, param in model.named_parameters():
                     if 'weight' in name:
                         l2_reg = l2 + torch.norm(param, 1)
-                loss += l1 * l1_reg
-                loss += l2 * l2_reg
+                loss += l1 * l1_reg.item()
+                loss += l2 * l2_reg.item()
                 loss.backward()
                 # lr_schedule.step()
 
@@ -536,7 +466,7 @@ class Train:
                 valid_recons += [loss_recon.item()]
                 valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.to(device))).item())]
                 logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
-                del kl, loss_recon, kl_div, loss, images, reconstruct
+                del kl, loss_recon, kl_div, loss
 
 
             losses["valid"] += [np.mean(valid_losses)]
@@ -598,7 +528,7 @@ class Train:
                                     resblocks=resblocks,
                                     h_last=z_dim
                                     )
-                del img, recon
+                del img, recon, images, reconstruct
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 0:
                     print("Epoch: {}:\t"

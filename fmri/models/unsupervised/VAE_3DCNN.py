@@ -1,6 +1,5 @@
 import torch
 from ..utils.stochastic import GaussianSample
-from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 from ..utils.distributions import log_gaussian, log_standard_gaussian
