@@ -46,7 +46,7 @@ class Stochastic(nn.Module):
     """
 
     def reparameterize(self, mu, log_var):
-        epsilon = Variable(torch.randn(mu.size()), requires_grad=False)
+        epsilon = torch.randn(mu.size(), requires_grad=False)
 
         if mu.is_cuda:
             epsilon = epsilon.cuda()
@@ -265,7 +265,7 @@ class Autoencoder3DCNN(torch.nn.Module):
         if self.flow_type == "o-sylvester":
             self.flow = SylvesterFlows(in_features=[z_dim], flow_flavour='o-sylvester', n_flows=1, h_last_dim=None)
 
-    def random_init(self, func=nn.init.kaiming_normal_):
+    def random_init(self, func=nn.init.xavier_uniform_):
 
         for m in self.modules():
             if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
