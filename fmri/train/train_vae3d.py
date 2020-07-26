@@ -411,7 +411,7 @@ class Train:
                 os.mkdir('views')
             img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
             recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
-            del img, recon
+            del img, recon, images, reconstruct
             losses["train"] += [np.mean(train_losses)]
             kl_divs["train"] += [np.mean(train_kld)]
             losses_recon["train"] += [np.mean(train_recons)]
