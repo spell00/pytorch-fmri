@@ -66,7 +66,7 @@ class Train:
                  epochs=1000,
                  fp16_run=False,
                  checkpoint_path=None,
-                 epochs_per_checkpoint=1,
+                 epochs_per_checkpoint=-1,
                  epochs_per_print=10,
                  gated=True,
                  has_dense=True,
@@ -363,14 +363,14 @@ class Train:
                 #    pbar.update(1)
                 model.zero_grad()
                 images = batch
-                images = torch.autograd.Variable(images).to(device)
+                images = images.to(device)
                 images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
-                reconstruct = reconstruct[:, :,
-                              :images.shape[2],
-                              :images.shape[3],
-                              :images.shape[4]].squeeze(1)
-                images = images.squeeze(1)
+                # reconstruct = reconstruct[:, :,
+                #              :images.shape[2],
+                #              :images.shape[3],
+                #              :images.shape[4]].squeeze(1)
+                # images = images.squeeze(1)
                 loss_recon = criterion(
                     reconstruct,
                     images
@@ -445,11 +445,11 @@ class Train:
                 images = images.to(device)
                 images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
-                reconstruct = reconstruct[:, :,
-                              :images.shape[2],
-                              :images.shape[3],
-                              :images.shape[4]].squeeze(1)
-                images = images.squeeze(1)
+                # reconstruct = reconstruct[:, :,
+                #               :images.shape[2],
+                #               :images.shape[3],
+                #               :images.shape[4]].squeeze(1)
+                # images = images.squeeze(1)
                 loss_recon = criterion(
                     reconstruct,
                     images.to(device)
@@ -487,14 +487,14 @@ class Train:
             else:
                 early_stop_counter += 1
 
-            if epoch % self.epochs_per_checkpoint == 0:
+            if epoch % self.epochs_per_checkpoint == 0 and self.save:
                 img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
                 recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
                 if 'views' not in os.listdir():
                     os.mkdir('views')
                 img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
                 recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
-                if best_epoch and self.save:
+                if best_epoch:
                     if self.verbose > 1:
                         print('Saving model...')
                     save_checkpoint(model=model,
@@ -568,14 +568,14 @@ if __name__ == "__main__":
     kernel_sizes = [3, 3, 3, 3, 3]
     kernel_sizes_deconv = [3, 3, 3, 3, 3]
     strides = [1, 1, 1, 1, 1]
-    strides_deconv = [1, 1, 1, 1, 2]
+    strides_deconv = [1, 1, 1, 1, 1]
     dilatations = [1, 1, 1, 1, 1]
     dilatations_Deconv = [1, 1, 1, 1, 1, 1]
     paddings = [1, 1, 1, 1, 1]
     paddings_deconv = [1, 1, 1, 1, 1]
     dilatations_deconv = [1, 1, 1, 1, 1]
     n_flows = 10
-    bs = 2
+    bs = 8
     maxpool = 2
     flow_type = 'hf'
     epochs_per_checkpoint = 1
