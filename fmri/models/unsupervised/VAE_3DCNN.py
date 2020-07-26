@@ -117,7 +117,7 @@ class ResBlockDeconv(nn.Module):
         return out
 
 
-class Autoencoder3DCNN(nn.Module):
+class Autoencoder3DCNN(torch.nn.Module):
     def __init__(self,
                  z_dim,
                  maxpool,
@@ -143,7 +143,7 @@ class Autoencoder3DCNN(nn.Module):
         super(Autoencoder3DCNN, self).__init__()
         self.resconv = nn.ModuleList()
         self.resdeconv = nn.ModuleList()
-        self.indices = [torch.Tensor() for _ in range(len(in_channels))]
+        self.indices = []
         self.GaussianSample = GaussianSample(z_dim, z_dim)
         self.activation = activation()
         # self.swish = Swish()
@@ -163,18 +163,30 @@ class Autoencoder3DCNN(nn.Module):
             layers_list = []
             if not gated:
                 layers_list += [
-                    nn.Conv3d(ins, outs, ksize, stride, pad, dilats),
+                    torch.nn.Conv3d(in_channels=ins,
+                                    out_channels=outs,
+                                    kernel_size=ksize,
+                                    stride=stride,
+                                    padding=pad,
+                                    dilation=dilats,
+                                    ),
                     nn.BatchNorm3d(num_features=outs),
                     activation(),
                     nn.Dropout3d(0.5),
                 ]
             else:
                 layers_list += [
-                    GatedConv3d(ins, outs, ksize, stride, pad, dilats, nn.Tanh()),
+                    GatedConv3d(input_channels=ins,
+                                output_channels=outs,
+                                kernel_size=ksize,
+                                stride=stride,
+                                padding=pad,
+                                dilation=dilats,
+                                activation=nn.Tanh()
+                                ),
                     nn.BatchNorm3d(num_features=outs),
                     activation(),
                     nn.Dropout3d(0.5),
-                    nn.MaxPool3d(maxpool, return_indices=False)
                 ]
             if resblocks and i < len(in_channels) - 1:
                 for _ in range(n_res):
@@ -194,7 +206,31 @@ class Autoencoder3DCNN(nn.Module):
                                                                         dilatations_deconv,
                                                                         padding_deconv)):
             layers_list = []
-            if resblocks and i != 0:
+            if not gated:
+                layers_list += [torch.nn.ConvTranspose3d(in_channels=ins,
+                                                         out_channels=outs,
+                                                         kernel_size=ksize,
+                                                         padding=pad,
+                                                         stride=stride,
+                                                         dilation=dilats),
+                                nn.BatchNorm3d(num_features=outs),
+                                activation(),
+                                nn.Dropout3d(0.5),
+                                ]
+            else:
+                layers_list += [GatedConvTranspose3d(input_channels=ins,
+                                                     output_channels=outs,
+                                                     kernel_size=ksize,
+                                                     stride=stride,
+                                                     padding=pad,
+                                                     dilation=dilats,
+                                                     activation=nn.Tanh()
+                                                     ),
+                                nn.BatchNorm3d(num_features=outs),
+                                activation(),
+                                nn.Dropout3d(0.5),
+                                ]
+            if resblocks and i < len(in_channels) - 1:
                 for _ in range(n_res):
                     layers_list += [
                         ResBlockDeconv(ins, outs, activation),
@@ -202,32 +238,16 @@ class Autoencoder3DCNN(nn.Module):
                         activation(),
                         nn.Dropout3d(0.5)
                     ]
-            if not gated:
-                layers_list += [nn.ConvTranspose3d(ins, outs, ksize, pad, stride, dilats),
-                                nn.BatchNorm3d(num_features=outs),
-                                activation(),
-                                nn.Dropout3d(0.5),
-                                nn.MaxUnpool3d(maxpool)
-                                ]
-            else:
-                layers_list += [GatedConvTranspose3d(ins, outs, ksize, stride, pad, dilats, nn.Tanh()),
-                                nn.BatchNorm3d(num_features=outs),
-                                activation(),
-                                nn.Dropout3d(0.5),
-                                nn.MaxUnpool3d(maxpool)
-                                ]
             self.resdeconv += [nn.Sequential(*layers_list)]
 
         self.dense1 = nn.Sequential(
             nn.Linear(in_features=out_channels[-1], out_features=z_dim),
             nn.BatchNorm1d(num_features=z_dim),
-            activation(),
             nn.Dropout(0.5)
         )
         self.dense2 = nn.Sequential(
             nn.Linear(in_features=z_dim, out_features=out_channels[-1]),
             nn.BatchNorm1d(num_features=out_channels[-1]),
-            activation(),
             nn.Dropout(0.5)
         )
         self.maxpool = nn.MaxPool3d(maxpool, return_indices=True)
@@ -292,7 +312,8 @@ class Autoencoder3DCNN(nn.Module):
     def encoder(self, x):
         for i, resconv in enumerate(self.resconv):
             x = resconv(x)
-            x, self.indices[i] = self.maxpool(x)
+            x, indices = self.maxpool(x)
+            self.indices += [indices]
         z = x.squeeze()
         if self.has_dense:
             z = self.dense1(z)
@@ -304,8 +325,8 @@ class Autoencoder3DCNN(nn.Module):
 
         x = z.unsqueeze(2).unsqueeze(3).unsqueeze(4)
         for i, resdeconv in enumerate(self.resdeconv):
+            x = self.maxunpool(x, indices=self.indices[-i-1])
             x = resdeconv(x)
-            x = self.maxunpool(x, self.indices[i])
 
         if (len(x.shape) == 3):
             x.unsqueeze(0)

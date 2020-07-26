@@ -635,19 +635,19 @@ if __name__ == "__main__":
 
     random.seed(10)
 
-    size = 33
+    size = 32
     z_dim = 50
-    in_channels = [1, 64, 128, 128, 128, 256, 256]
-    out_channels = [64, 128, 128, 128, 256, 256, 256]
-    kernel_sizes = [3, 3, 3, 3, 3, 3, 3]
-    kernel_sizes_deconv = [3, 3, 3, 3, 3, 3, 3]
-    strides = [1, 1, 1, 1, 1, 1, 1]
-    strides_deconv = [1, 1, 1, 1, 1, 1, 1]
-    dilatations = [1, 1, 1, 1, 1, 1, 1]
-    dilatations_Deconv = [1, 1, 1, 1, 1, 1, 1]
-    paddings = [2, 2, 2, 2, 2, 2, 1]
-    paddings_deconv = [1, 1, 1, 1, 1, 1, 1]
-    dilatations_deconv = [1, 1, 1, 1, 1, 1, 1]
+    in_channels = [1, 128, 128, 128, 128]
+    out_channels = [128, 128, 128, 128, 128]
+    kernel_sizes = [3, 3, 3, 3, 3]
+    kernel_sizes_deconv = [3, 3, 3, 3, 3]
+    strides = [1, 1, 1, 1, 1]
+    strides_deconv = [1, 1, 1, 1, 2]
+    dilatations = [1, 1, 1, 1, 1]
+    dilatations_Deconv = [1, 1, 1, 1, 1, 1]
+    paddings = [1, 1, 1, 1, 1]
+    paddings_deconv = [1, 1, 1, 1, 1]
+    dilatations_deconv = [1, 1, 1, 1, 1]
     n_flows = 10
     bs = 2
     maxpool = 2
@@ -659,7 +659,7 @@ if __name__ == "__main__":
     resblocks = True
     checkpoint_path = "checkpoints"
     basedir = '/Users/simonpelletier/Downloads/images3d/t1/'
-    path = basedir + '33x33/'
+    path = basedir + str(size) + 'x' + str(size) + '/'
 
     n_epochs = 10000
     save = False
@@ -677,7 +677,7 @@ if __name__ == "__main__":
                      batch_size=bs,
                      epochs=n_epochs,
                      checkpoint_path=checkpoint_path,
-                     epochs_per_checkpoint=epochs_per_checkpoint,
+                     epochs_per_checkpoint=1,
                      gated=gated,
                      resblocks=resblocks,
                      fp16_run=False,
