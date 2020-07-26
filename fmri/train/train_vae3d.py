@@ -385,8 +385,8 @@ class Train:
                 for name, param in model.named_parameters():
                     if 'weight' in name:
                         l2_reg = l2 + torch.norm(param, 1)
-                loss += l1 * l1_reg.item()
-                loss += l2 * l2_reg.item()
+                loss += l1 * l1_reg
+                loss += l2 * l2_reg
                 loss.backward()
                 # lr_schedule.step()
 
