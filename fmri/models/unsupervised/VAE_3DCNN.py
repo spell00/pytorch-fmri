@@ -49,7 +49,7 @@ class Stochastic(nn.Module):
         epsilon = Variable(torch.randn(mu.size()), requires_grad=False)
 
         if mu.is_cuda:
-            epsilon = epsilon
+            epsilon = epsilon.cuda()
 
         # log_std = 0.5 * log_var
         # std = exp(log_std)
