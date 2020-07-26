@@ -403,10 +403,10 @@ class Train:
                 ]
 
                 logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
-                del kl, loss_recon, kl_div, loss #, l1_reg, l2_reg, name, param
+                del kl, loss_recon, kl_div, loss, images, reconstruct, #, l1_reg, l2_reg, name, param
 
-            img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
-            recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
+            #img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
+            #recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
             if 'views' not in os.listdir():
                 os.mkdir('views')
             img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
@@ -415,7 +415,7 @@ class Train:
             kl_divs["train"] += [np.mean(train_kld)]
             losses_recon["train"] += [np.mean(train_recons)]
             running_abs_error["train"] += [np.mean(train_abs_error)]
-            del img, recon, images, reconstruct, train_losses, train_kld, train_recons, train_abs_error
+            del img, recon,  train_losses, train_kld, train_recons, train_abs_error
 
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 1:
@@ -466,7 +466,7 @@ class Train:
                 valid_recons += [loss_recon.item()]
                 valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.to(device))).item())]
                 logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
-                del kl, loss_recon, kl_div, loss
+                del kl, loss_recon, kl_div, loss, images, reconstruct
 
 
             losses["valid"] += [np.mean(valid_losses)]
@@ -488,12 +488,12 @@ class Train:
                 early_stop_counter += 1
 
             if epoch % self.epochs_per_checkpoint == 0 and self.save:
-                img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
-                recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
+                #img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
+                #recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
                 if 'views' not in os.listdir():
                     os.mkdir('views')
-                img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
-                recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
+                #img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
+                #recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
                 if best_epoch:
                     if self.verbose > 1:
                         print('Saving model...')
@@ -528,8 +528,8 @@ class Train:
                                     resblocks=resblocks,
                                     h_last=z_dim
                                     )
-                del img, recon
-            del images, reconstruct, valid_losses, valid_kld, valid_recons, valid_abs_error
+                # del img, recon
+            del valid_losses, valid_kld, valid_recons, valid_abs_error
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 0:
                     print("Epoch: {}:\t"
