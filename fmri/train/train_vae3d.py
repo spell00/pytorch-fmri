@@ -529,7 +529,7 @@ class Train:
                                     h_last=z_dim
                                     )
                 del img, recon
-            del images, reconstruct
+            del images, reconstruct, valid_losses, valid_kld, valid_recons, valid_abs_error
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 0:
                     print("Epoch: {}:\t"
