@@ -528,7 +528,8 @@ class Train:
                                     resblocks=resblocks,
                                     h_last=z_dim
                                     )
-                del img, recon, images, reconstruct
+                del img, recon
+            del images, reconstruct
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 0:
                     print("Epoch: {}:\t"
