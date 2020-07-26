@@ -377,16 +377,16 @@ class Train:
                 ).sum() / self.batch_size
                 kl_div = torch.mean(kl)
                 loss = loss_recon + kl_div
-                l2_reg = torch.Tensor([0])
-                l1_reg = torch.Tensor([0])
-                for name, param in model.named_parameters():
-                    if 'weight' in name:
-                        l1_reg = l1 + torch.norm(param, 1)
-                for name, param in model.named_parameters():
-                    if 'weight' in name:
-                        l2_reg = l2 + torch.norm(param, 1)
-                loss += l1 * l1_reg
-                loss += l2 * l2_reg
+                # l2_reg = torch.Tensor([0])
+                # l1_reg = torch.Tensor([0])
+                # for name, param in model.named_parameters():
+                #     if 'weight' in name:
+                #         l1_reg = l1 + torch.norm(param, 1)
+                # for name, param in model.named_parameters():
+                #     if 'weight' in name:
+                #         l2_reg = l2 + torch.norm(param, 1)
+                # loss += l1 * l1_reg
+                # loss += l2 * l2_reg
                 loss.backward()
                 # lr_schedule.step()
 
@@ -403,7 +403,7 @@ class Train:
                 ]
 
                 logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
-                del kl, loss_recon, kl_div, loss, l1_reg, l2_reg, name, param
+                del kl, loss_recon, kl_div, loss #, l1_reg, l2_reg, name, param
 
             img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
             recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
@@ -411,11 +411,11 @@ class Train:
                 os.mkdir('views')
             img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
             recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
-            del img, recon, images, reconstruct
             losses["train"] += [np.mean(train_losses)]
             kl_divs["train"] += [np.mean(train_kld)]
             losses_recon["train"] += [np.mean(train_recons)]
             running_abs_error["train"] += [np.mean(train_abs_error)]
+            del img, recon, images, reconstruct, train_losses, train_kld, train_recons, train_abs_error
 
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 1:

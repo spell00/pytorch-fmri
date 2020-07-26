@@ -162,7 +162,7 @@ class Autoencoder3DCNN(torch.nn.Module):
             layers_list = []
             if not gated:
                 layers_list += [
-                    torch.nn.Conv3d(in_channels=ins,
+                    nn.Conv3d(in_channels=ins,
                                     out_channels=outs,
                                     kernel_size=ksize,
                                     stride=stride,
@@ -206,7 +206,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                                                         padding_deconv)):
             layers_list = []
             if not gated:
-                layers_list += [torch.nn.ConvTranspose3d(in_channels=ins,
+                layers_list += [nn.ConvTranspose3d(in_channels=ins,
                                                          out_channels=outs,
                                                          kernel_size=ksize,
                                                          padding=pad,
@@ -313,6 +313,7 @@ class Autoencoder3DCNN(torch.nn.Module):
             x = resconv(x)
             x, indices = self.maxpool(x)
             self.indices += [indices]
+            del indices
         z = x.squeeze()
         if self.has_dense:
             z = self.dense1(z)
