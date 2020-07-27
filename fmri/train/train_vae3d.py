@@ -46,7 +46,6 @@ def load_subject(filename, mask_img):
     return subject_img
 
 
-
 class Train:
     def __init__(self,
                  in_channels,
@@ -67,7 +66,7 @@ class Train:
                  fp16_run=False,
                  checkpoint_path=None,
                  epochs_per_checkpoint=-1,
-                 epochs_per_print=10,
+                 epochs_per_print=1,
                  gated=True,
                  has_dense=True,
                  batchnorm=False,
@@ -191,7 +190,7 @@ class Train:
                                      gated=self.gated,
                                      resblocks=self.resblocks,
                                      activation=self.activation
-                                     ).cuda()
+                                     )
         else:
             model = SylvesterVAE(z_dim=z_dim,
                                  maxpool=self.maxpool,
@@ -216,7 +215,8 @@ class Train:
                                  num_elements=3,
                                  auxiliary=False,
                                  a_dim=0,
-                                 ).cuda()
+                                 )
+        model.to(device)
         model.random_init()
         criterion = nn.MSELoss(reduction="none")
         if optimizer_type == 'adamw':
@@ -273,7 +273,7 @@ class Train:
                                         resblocks=resblocks,
                                         h_last=self.out_channels[-1],
                                         )
-            model = model.cuda()
+            model.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
 
@@ -294,14 +294,12 @@ class Train:
                                   num_workers=0,
                                   shuffle=True,
                                   batch_size=self.batch_size,
-                                  pin_memory=False,
                                   drop_last=True)
         valid_loader = DataLoader(valid_set,
                                   num_workers=0,
-                                  shuffle=True,
-                                  batch_size=2,
-                                  pin_memory=False,
-                                  drop_last=True)
+                                  shuffle=False,
+                                  batch_size=1,
+                                  drop_last=False)
 
         # Get shared output_directory ready
         logger = SummaryWriter('logs')
@@ -359,22 +357,12 @@ class Train:
             model.train()
 
             # pbar = tqdm(total=len(train_loader))
-            for i, batch in enumerate(train_loader):
+            for i, images in enumerate(train_loader):
                 #    pbar.update(1)
                 model.zero_grad()
-                images = batch
-                images = images.cuda()
-                images = images.unsqueeze(1)
+                images = images.to(device).unsqueeze(1)
                 reconstruct, kl = model(images)
-                # reconstruct = reconstruct[:, :,
-                #              :images.shape[2],
-                #              :images.shape[3],
-                #              :images.shape[4]].squeeze(1)
-                # images = images.squeeze(1)
-                loss_recon = criterion(
-                    reconstruct,
-                    images
-                ).sum() / self.batch_size
+                loss_recon = criterion(reconstruct, images).sum() / self.batch_size
                 kl_div = torch.mean(kl)
                 loss = loss_recon + kl_div
                 # l2_reg = torch.Tensor([0])
@@ -390,23 +378,20 @@ class Train:
                 loss.backward()
                 # lr_schedule.step()
 
-                try:
-                    train_losses += [loss.item()]
-                except:
-                    return best_loss
+                train_losses += [loss.item()]
                 train_kld += [kl_div.item()]
                 train_recons += [loss_recon.item()]
-                train_abs_error += [
-                    float(torch.mean(torch.abs_(
-                        reconstruct - images.cuda()
-                    )).item())
-                ]
+                # train_abs_error += [
+                #     float(torch.mean(torch.abs_(
+                #        reconstruct - images
+                #    )).item())
+                #]
 
                 logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
-                del kl, loss_recon, kl_div, loss, images, reconstruct, #, l1_reg, l2_reg, name, param
+                del kl, loss_recon, kl_div, loss, images, reconstruct,  # , l1_reg, l2_reg, name, param
 
-            #img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
-            #recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
+            # img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
+            # recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
             if 'views' not in os.listdir():
                 os.mkdir('views')
             # img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
@@ -415,7 +400,7 @@ class Train:
             kl_divs["train"] += [np.mean(train_kld)]
             losses_recon["train"] += [np.mean(train_recons)]
             running_abs_error["train"] += [np.mean(train_abs_error)]
-            del train_losses, train_kld, train_recons, train_abs_error # , img, recon
+            del train_losses, train_kld, train_recons, train_abs_error  # , img, recon
 
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 1:
@@ -439,35 +424,26 @@ class Train:
             valid_recons = []
             valid_abs_error = []
             # pbar = tqdm(total=len(valid_loader))
-            for i, batch in enumerate(valid_loader):
+            for i, images in enumerate(valid_loader):
                 #    pbar.update(1)
-                images = batch
-                images = images.cuda()
-                images = images.unsqueeze(1)
+                images = images.to(device).unsqueeze(1)
                 reconstruct, kl = model(images)
                 # reconstruct = reconstruct[:, :,
                 #               :images.shape[2],
                 #               :images.shape[3],
                 #               :images.shape[4]].squeeze(1)
                 # images = images.squeeze(1)
-                loss_recon = criterion(
-                    reconstruct,
-                    images.cuda()
-                ).sum()
+                loss_recon = criterion(reconstruct, images).sum()
                 kl_div = torch.mean(kl)
                 if epoch < warmup:
                     kl_div = kl_div * (epoch / warmup)
                 loss = loss_recon + kl_div
-                try:
-                    valid_losses += [loss.item()]
-                except:
-                    return best_loss
+                valid_losses += [loss.item()]
                 valid_kld += [kl_div.item()]
                 valid_recons += [loss_recon.item()]
-                valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.cuda())).item())]
+                # valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images)).item())]
                 logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
                 del kl, loss_recon, kl_div, loss, images, reconstruct
-
 
             losses["valid"] += [np.mean(valid_losses)]
             kl_divs["valid"] += [np.mean(valid_kld)]
@@ -488,12 +464,12 @@ class Train:
                 early_stop_counter += 1
 
             if epoch % self.epochs_per_checkpoint == 0 and self.save:
-                #img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
-                #recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
+                # img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
+                # recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
                 if 'views' not in os.listdir():
                     os.mkdir('views')
-                #img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
-                #recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
+                # img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
+                # recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
                 if best_epoch:
                     if self.verbose > 1:
                         print('Saving model...')
@@ -548,9 +524,9 @@ class Train:
                     print("Current Momentum:", optimizer.param_groups[0]['momentum'])
             if self.plot_perform:
                 plot_performance(loss_total=losses, losses_recon=losses_recon, kl_divs=kl_divs, shapes=shapes,
-                             results_path="../figures",
-                             filename="training_loss_trace_"
-                                      + self.modelname + '.jpg')
+                                 results_path="../figures",
+                                 filename="training_loss_trace_"
+                                          + self.modelname + '.jpg')
         if self.verbose > 0:
             print('BEST LOSS :', best_loss)
         return best_loss
