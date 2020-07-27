@@ -29,10 +29,6 @@ import h5py
 import nibabel as nib
 from fmri.utils.utils import validation_split
 
-if torch.cuda.is_available():
-    device = 'cuda'
-else:
-    device = 'cpu'
 
 
 def load_subject(filename, mask_img):
@@ -130,6 +126,11 @@ class Train:
         warmup = params['warmup']
         l1 = params['l1'].__format__('e')
         l2 = params['l2'].__format__('e')
+
+        if torch.cuda.is_available():
+            device = 'cuda'
+        else:
+            device = 'cpu'
 
         weight_decay = float(str(weight_decay)[:1] + str(weight_decay)[-4:])
         learning_rate = float(str(learning_rate)[:1] + str(learning_rate)[-4:])
@@ -273,7 +274,7 @@ class Train:
                                         h_last=self.out_channels[-1],
                                         )
         model = model.to(device)
-        model.flow = model.flow.to(device)
+        # model.flow = model.flow.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
 
