@@ -191,7 +191,7 @@ class Train:
                                      gated=self.gated,
                                      resblocks=self.resblocks,
                                      activation=self.activation
-                                     ).to(device)
+                                     ).cuda()
         else:
             model = SylvesterVAE(z_dim=z_dim,
                                  maxpool=self.maxpool,
@@ -216,7 +216,7 @@ class Train:
                                  num_elements=3,
                                  auxiliary=False,
                                  a_dim=0,
-                                 ).to(device)
+                                 ).cuda()
         model.random_init()
         criterion = nn.MSELoss(reduction="none")
         if optimizer_type == 'adamw':
@@ -273,7 +273,7 @@ class Train:
                                         resblocks=resblocks,
                                         h_last=self.out_channels[-1],
                                         )
-        model = model.to(device)
+            model = model.cuda()
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
 
@@ -363,7 +363,7 @@ class Train:
                 #    pbar.update(1)
                 model.zero_grad()
                 images = batch
-                images = images.to(device)
+                images = images.cuda()
                 images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
                 # reconstruct = reconstruct[:, :,
@@ -398,7 +398,7 @@ class Train:
                 train_recons += [loss_recon.item()]
                 train_abs_error += [
                     float(torch.mean(torch.abs_(
-                        reconstruct - images.to(device)
+                        reconstruct - images.cuda()
                     )).item())
                 ]
 
@@ -442,7 +442,7 @@ class Train:
             for i, batch in enumerate(valid_loader):
                 #    pbar.update(1)
                 images = batch
-                images = images.to(device)
+                images = images.cuda()
                 images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
                 # reconstruct = reconstruct[:, :,
@@ -452,7 +452,7 @@ class Train:
                 # images = images.squeeze(1)
                 loss_recon = criterion(
                     reconstruct,
-                    images.to(device)
+                    images.cuda()
                 ).sum()
                 kl_div = torch.mean(kl)
                 if epoch < warmup:
@@ -464,7 +464,7 @@ class Train:
                     return best_loss
                 valid_kld += [kl_div.item()]
                 valid_recons += [loss_recon.item()]
-                valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.to(device))).item())]
+                valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.cuda())).item())]
                 logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
                 del kl, loss_recon, kl_div, loss, images, reconstruct
 
