@@ -32,9 +32,8 @@ def _resize_data(data, new_size=(160, 160, 160)):
 
 
 class MRIDataset(Dataset):
-    def __init__(self, path, transform=None, size=32, device='cuda'):
+    def __init__(self, path, transform=None, size=32):
         self.path = path
-        self.device = device
         self.size = size
         self.samples = os.listdir(path)
         self.transform = transform
@@ -47,11 +46,11 @@ class MRIDataset(Dataset):
         x = nib.load(self.path + x).dataobj
         x = np.array(x)
         # x = _resize_data(x, (self.size, self.size, self.size))
-        x = torch.Tensor(x).to(self.device)
+        x = torch.Tensor(x)
 
         if self.transform:
             x = self.transform(x)
-        return x.unsqueeze(0)
+        return x
 
 
 def load_checkpoint(checkpoint_path,

@@ -66,7 +66,7 @@ class Train:
                  fp16_run=False,
                  checkpoint_path=None,
                  epochs_per_checkpoint=-1,
-                 epochs_per_print=1,
+                 epochs_per_print=10,
                  gated=True,
                  has_dense=True,
                  batchnorm=False,
@@ -190,7 +190,7 @@ class Train:
                                      gated=self.gated,
                                      resblocks=self.resblocks,
                                      activation=self.activation
-                                     )
+                                     ).to(device)
         else:
             model = SylvesterVAE(z_dim=z_dim,
                                  maxpool=self.maxpool,
@@ -215,7 +215,7 @@ class Train:
                                  num_elements=3,
                                  auxiliary=False,
                                  a_dim=0,
-                                 )
+                                 ).to(device)
         model.random_init()
         criterion = nn.MSELoss(reduction="none")
         if optimizer_type == 'adamw':
@@ -272,8 +272,7 @@ class Train:
                                         resblocks=resblocks,
                                         h_last=self.out_channels[-1],
                                         )
-        model = model.to(device)
-        model.flow = model.flow.to(device)
+            model = model.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
 
@@ -287,19 +286,21 @@ class Train:
             torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
             Normalize()
         ])
-        all_set = MRIDataset(self.path, transform=train_transform, device=device)
+        all_set = MRIDataset(self.path, transform=train_transform)
         train_set, valid_set = validation_split(all_set, val_share=self.val_share)
 
         train_loader = DataLoader(train_set,
                                   num_workers=0,
                                   shuffle=True,
                                   batch_size=self.batch_size,
+                                  pin_memory=False,
                                   drop_last=True)
         valid_loader = DataLoader(valid_set,
                                   num_workers=0,
-                                  shuffle=False,
+                                  shuffle=True,
                                   batch_size=2,
-                                  drop_last=False)
+                                  pin_memory=False,
+                                  drop_last=True)
 
         # Get shared output_directory ready
         logger = SummaryWriter('logs')
@@ -357,11 +358,17 @@ class Train:
             model.train()
 
             # pbar = tqdm(total=len(train_loader))
-            for i, images in enumerate(train_loader):
+            for i, batch in enumerate(train_loader):
                 #    pbar.update(1)
                 model.zero_grad()
+                images = batch
+                images = images.to(device)
+                images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
-                loss_recon = criterion(reconstruct, images).sum() / self.batch_size
+                loss_recon = criterion(
+                    reconstruct,
+                    images
+                ).sum() / self.batch_size
                 kl_div = torch.mean(kl)
                 loss = loss_recon + kl_div
                 # l2_reg = torch.Tensor([0])
@@ -377,14 +384,12 @@ class Train:
                 loss.backward()
                 # lr_schedule.step()
 
-                train_losses += [loss.item()]
+                try:
+                    train_losses += [loss.item()]
+                except:
+                    return best_loss
                 train_kld += [kl_div.item()]
                 train_recons += [loss_recon.item()]
-                # train_abs_error += [
-                #     float(torch.mean(torch.abs_(
-                #        reconstruct - images
-                #    )).item())
-                #]
 
                 logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
                 del kl, loss_recon, kl_div, loss, images, reconstruct,  # , l1_reg, l2_reg, name, param
@@ -398,7 +403,6 @@ class Train:
             losses["train"] += [np.mean(train_losses)]
             kl_divs["train"] += [np.mean(train_kld)]
             losses_recon["train"] += [np.mean(train_recons)]
-            running_abs_error["train"] += [np.mean(train_abs_error)]
             del train_losses, train_kld, train_recons, train_abs_error  # , img, recon
 
             if epoch % self.epochs_per_print == 0:
@@ -423,25 +427,32 @@ class Train:
             valid_recons = []
             valid_abs_error = []
             # pbar = tqdm(total=len(valid_loader))
-            for i, images in enumerate(valid_loader):
+            for i, batch in enumerate(valid_loader):
                 #    pbar.update(1)
+                images = batch
+                images = images.to(device)
+                images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
-                loss_recon = criterion(reconstruct, images).sum()
+                loss_recon = criterion(
+                    reconstruct,
+                    images
+                ).sum()
                 kl_div = torch.mean(kl)
                 if epoch < warmup:
                     kl_div = kl_div * (epoch / warmup)
                 loss = loss_recon + kl_div
-                valid_losses += [loss.item()]
+                try:
+                    valid_losses += [loss.item()]
+                except:
+                    return best_loss
                 valid_kld += [kl_div.item()]
                 valid_recons += [loss_recon.item()]
-                # valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images)).item())]
                 logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
                 del kl, loss_recon, kl_div, loss, images, reconstruct
 
             losses["valid"] += [np.mean(valid_losses)]
             kl_divs["valid"] += [np.mean(valid_kld)]
             losses_recon["valid"] += [np.mean(valid_recons)]
-            running_abs_error["valid"] += [np.mean(valid_abs_error)]
             if epoch - epoch_offset > 5:
                 lr_schedule.step(losses["valid"][-1])
             # should be valid, but train is ok to test if it can be done without caring about
@@ -547,7 +558,7 @@ if __name__ == "__main__":
     n_flows = 10
     bs = 8
     maxpool = 2
-    flow_type = 'nf'
+    flow_type = 'hf'
     epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True
