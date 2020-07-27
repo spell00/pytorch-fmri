@@ -273,6 +273,7 @@ class Train:
                                         h_last=self.out_channels[-1],
                                         )
             model = model.to(device)
+        model.flow = model.flow.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
 
@@ -331,10 +332,6 @@ class Train:
             "valid": [],
         }
         losses_recon = {
-            "train": [],
-            "valid": [],
-        }
-        running_abs_error = {
             "train": [],
             "valid": [],
         }
