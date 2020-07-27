@@ -19,6 +19,7 @@ from ax.service.managed_loop import optimize
 # from ax.utils.notebook.plotting import render, init_notebook_plotting
 from ax.utils.tutorials.cnn_utils import load_mnist, train, evaluate, CNN
 import random
+from torch.autograd import Variable
 
 import os
 
@@ -355,11 +356,10 @@ class Train:
             model.train()
 
             # pbar = tqdm(total=len(train_loader))
-            for i, batch in enumerate(train_loader):
+            for i, images in enumerate(train_loader):
                 #    pbar.update(1)
                 model.zero_grad()
-                images = batch
-                images = images.to(device)
+                images = Variable(images, requires_grad=True).to(device)
                 images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
                 loss_recon = criterion(
@@ -427,7 +427,7 @@ class Train:
             for i, batch in enumerate(valid_loader):
                 #    pbar.update(1)
                 images = batch
-                images = images.to(device)
+                images = Variable(images, requires_grad=True).to(device)
                 images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
                 loss_recon = criterion(

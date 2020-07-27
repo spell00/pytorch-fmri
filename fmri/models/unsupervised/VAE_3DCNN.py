@@ -6,6 +6,7 @@ from ..utils.distributions import log_gaussian, log_standard_gaussian
 from ..utils.flow import NormalizingFlows, IAF, HouseholderFlow, ccLinIAF, SylvesterFlows, TriangularSylvester
 from ..utils.masked_layer import GatedConv3d, GatedConvTranspose3d
 
+from torch.autograd import Variable
 in_channels = None
 out_channels = None
 kernel_sizes = None
@@ -45,7 +46,7 @@ class Stochastic(nn.Module):
     """
 
     def reparameterize(self, mu, log_var):
-        epsilon = torch.randn(mu.size(), requires_grad=False)
+        epsilon = Variable(torch.randn(mu.size(), requires_grad=False))
 
         if mu.is_cuda:
             epsilon = epsilon.cuda()
