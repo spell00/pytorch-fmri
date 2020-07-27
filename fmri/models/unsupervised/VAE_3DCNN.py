@@ -276,8 +276,8 @@ class Autoencoder3DCNN(torch.nn.Module):
         if len(z.shape) == 1:
             z = z.view(1, -1)
 
-        print(self.flow)
-        print(z)
+        #print(self.flow)
+        #print(z)
         if (self.flow_type == "nf") and self.n_flows > 0:
             (mu, log_var) = q_param
             f_z, log_det_z = self.flow(z)
