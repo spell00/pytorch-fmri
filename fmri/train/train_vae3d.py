@@ -390,7 +390,7 @@ class Train:
                 train_recons += [loss_recon.item()]
 
                 logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
-                del kl, loss_recon, kl_div, loss, images, reconstruct,  # , l1_reg, l2_reg, name, param
+                del kl, loss_recon, kl_div, loss, images, reconstruct, l1_reg, l2_reg
 
             # img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
             # recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
