@@ -4,9 +4,9 @@ import torch.nn as nn
 import numpy as np
 import json
 from torch.utils.data import DataLoader
-# from tensorboardX import SummaryWriter
+from tensorboardX import SummaryWriter
 from fmri.utils.CycleAnnealScheduler import CycleScheduler
-from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDataset, _resize_data
+from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDataset
 from fmri.utils.transform_3d import Normalize, Flip90, Flip180, Flip270, XFlip, YFlip, ZFlip
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
 from fmri.models.unsupervised.SylvesterVAE3DCNN import SylvesterVAE
@@ -308,7 +308,7 @@ class Train:
                                   drop_last=True)
 
         # Get shared output_directory ready
-        # logger = SummaryWriter('logs')
+        logger = SummaryWriter('logs')
         epoch_offset = max(1, epoch)
 
         if scheduler == 'ReduceLROnPlateau':
@@ -361,8 +361,8 @@ class Train:
             for i, images in enumerate(train_loader):
                 #    pbar.update(1)
                 model.zero_grad()
-                images = Variable(images, requires_grad=True).to(device)
-                images = images.unsqueeze(1)
+                # images = Variable(images, requires_grad=True).to(device)
+                # images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
                 loss_recon = criterion(
                     reconstruct,
@@ -390,7 +390,7 @@ class Train:
                 train_kld += [kl_div.item()]
                 train_recons += [loss_recon.item()]
 
-                # logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
+                logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
                 del kl, loss_recon, kl_div, loss, images, reconstruct,  # , l1_reg, l2_reg, name, param
 
             # img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
@@ -426,11 +426,10 @@ class Train:
             valid_recons = []
             valid_abs_error = []
             # pbar = tqdm(total=len(valid_loader))
-            for i, batch in enumerate(valid_loader):
+            for i, images in enumerate(valid_loader):
                 #    pbar.update(1)
-                images = batch
-                images = Variable(images, requires_grad=True).to(device)
-                images = images.unsqueeze(1)
+                # images = Variable(images, requires_grad=True).to(device)
+                # images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
                 loss_recon = criterion(
                     reconstruct,
@@ -446,7 +445,7 @@ class Train:
                     return best_loss
                 valid_kld += [kl_div.item()]
                 valid_recons += [loss_recon.item()]
-                # logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
+                logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
                 del kl, loss_recon, kl_div, loss, images, reconstruct
 
             losses["valid"] += [np.mean(valid_losses)]
