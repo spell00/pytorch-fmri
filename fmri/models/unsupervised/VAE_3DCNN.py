@@ -46,8 +46,7 @@ class Stochastic(nn.Module):
     """
 
     def reparameterize(self, mu, log_var):
-        epsilon = Variable(torch.randn(mu.size(), requires_grad=False))
-
+        epsilon = Variable(torch.randn(mu.size()), requires_grad=False)
         if mu.is_cuda:
             epsilon = epsilon.cuda()
 
@@ -141,9 +140,9 @@ class Autoencoder3DCNN(torch.nn.Module):
                  resblocks=False,
                  ):
         super(Autoencoder3DCNN, self).__init__()
-        self.resconv = nn.ModuleList()
-        self.resdeconv = nn.ModuleList()
-        self.indices = []
+        resconv = []
+        resdeconv = []
+        self.indices = [torch.Tensor() for _ in range(len(in_channels))]
         self.GaussianSample = GaussianSample(z_dim, z_dim)
         self.activation = activation()
         # self.swish = Swish()
@@ -197,7 +196,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                         nn.Dropout(0.5)
                     ]
 
-            self.resconv += [nn.Sequential(*layers_list)]
+            resconv += [nn.Sequential(*layers_list)]
 
         for i, (ins, outs, ksize, stride, dilats, pad) in enumerate(zip(reversed(out_channels),
                                                                         reversed(in_channels),
@@ -238,7 +237,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                         activation(),
                         nn.Dropout(0.5)
                     ]
-            self.resdeconv += [nn.Sequential(*layers_list)]
+            resdeconv += [nn.Sequential(*layers_list)]
 
         self.dense1 = nn.Sequential(
             nn.Linear(in_features=out_channels[-1], out_features=z_dim),
@@ -252,6 +251,8 @@ class Autoencoder3DCNN(torch.nn.Module):
         )
         self.maxpool = nn.MaxPool3d(maxpool, return_indices=True)
         self.maxunpool = nn.MaxUnpool3d(maxpool)
+        self.resconv = nn.ModuleList(resconv)
+        self.resdeconv = nn.ModuleList(resdeconv)
         self.flow_type = flow_type
         self.n_flows = n_flows
         if self.flow_type == "nf":
@@ -315,9 +316,7 @@ class Autoencoder3DCNN(torch.nn.Module):
     def encoder(self, x):
         for i, resconv in enumerate(self.resconv):
             x = resconv(x)
-            x, indices = self.maxpool(x)
-            self.indices += [indices]
-            del indices
+            x, self.indices[i] = self.maxpool(x)
         z = x.squeeze()
         if self.has_dense:
             z = self.dense1(z)
