@@ -48,7 +48,7 @@ class MRIDataset(Dataset):
         x = np.array(x)
         # x = _resize_data(x, (self.size, self.size, self.size))
         x = torch.Tensor(x).to(self.device)
-
+        x.requires_grad = True
         if self.transform:
             x = self.transform(x)
         return x.unsqueeze(0)

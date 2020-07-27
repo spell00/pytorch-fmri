@@ -19,7 +19,6 @@ from ax.service.managed_loop import optimize
 # from ax.utils.notebook.plotting import render, init_notebook_plotting
 from ax.utils.tutorials.cnn_utils import load_mnist, train, evaluate, CNN
 import random
-from torch.autograd import Variable
 
 import os
 
@@ -602,7 +601,7 @@ if __name__ == "__main__":
             {"name": "n_flows", "type": "range", "bounds": [2, 20]},
             {"name": "scheduler", "type": "choice", "values":
                 ['ReduceLROnPlateau', 'ReduceLROnPlateau']},
-            {"name": "optimizer", "type": "choice", "values": ['adamw', 'adamw']},
+            {"name": "optimizer", "type": "choice", "values": ['rmsprop', 'rmsprop']},
             {"name": "l1", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "l2", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},

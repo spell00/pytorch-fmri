@@ -6,7 +6,6 @@ from ..utils.distributions import log_gaussian, log_standard_gaussian
 from ..utils.flow import NormalizingFlows, IAF, HouseholderFlow, ccLinIAF, SylvesterFlows, TriangularSylvester
 from ..utils.masked_layer import GatedConv3d, GatedConvTranspose3d
 
-from torch.autograd import Variable
 in_channels = None
 out_channels = None
 kernel_sizes = None
@@ -46,7 +45,7 @@ class Stochastic(nn.Module):
     """
 
     def reparameterize(self, mu, log_var):
-        epsilon = Variable(torch.randn(mu.size()), requires_grad=False)
+        epsilon = torch.randn(mu.size(), requires_grad=False)
         if mu.is_cuda:
             epsilon = epsilon.cuda()
 
@@ -173,7 +172,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                     ),
                     nn.BatchNorm3d(num_features=outs),
                     activation(),
-                    nn.Dropout(0.5),
+                    nn.Dropout3d(0.5),
                 ]
             else:
                 layers_list += [
@@ -187,7 +186,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                 ),
                     nn.BatchNorm3d(num_features=outs),
                     activation(),
-                    nn.Dropout(0.5),
+                    nn.Dropout3d(0.5),
                 ]
             if resblocks and i < len(in_channels) - 1:
                 for _ in range(n_res):
@@ -195,7 +194,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                         ResBlock(outs, outs, activation),
                         nn.BatchNorm3d(num_features=outs),
                         activation(),
-                        nn.Dropout(0.5)
+                        nn.Dropout3d(0.5)
                     ]
 
             resconv += [nn.Sequential(*layers_list)]
@@ -216,7 +215,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                                          dilation=dilats),
                                 nn.BatchNorm3d(num_features=outs),
                                 activation(),
-                                nn.Dropout(0.5),
+                                nn.Dropout3d(0.5),
                                 ]
             else:
                 layers_list += [GatedConvTranspose3d(input_channels=ins,
@@ -229,7 +228,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                                      ),
                                 nn.BatchNorm3d(num_features=outs),
                                 activation(),
-                                nn.Dropout(0.5),
+                                nn.Dropout3d(0.5),
                                 ]
             if resblocks and i < len(in_channels) - 1:
                 for _ in range(n_res):
@@ -237,7 +236,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                         ResBlockDeconv(outs, outs, activation),
                         nn.BatchNorm3d(num_features=outs),
                         activation(),
-                        nn.Dropout(0.5)
+                        nn.Dropout3d(0.5)
                     ]
             resdeconv += [nn.Sequential(*layers_list)]
 
