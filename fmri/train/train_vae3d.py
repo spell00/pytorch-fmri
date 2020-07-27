@@ -191,8 +191,9 @@ class Train:
                                      n_res=n_res,
                                      gated=self.gated,
                                      resblocks=self.resblocks,
-                                     activation=self.activation
-                                     )
+                                     activation=self.activation,
+                                     device=device
+            )
         else:
             model = SylvesterVAE(z_dim=z_dim,
                                  maxpool=self.maxpool,
@@ -217,6 +218,7 @@ class Train:
                                  num_elements=num_elements,
                                  auxiliary=False,
                                  a_dim=0,
+                                 device=device
                                  )
         model.random_init()
         criterion = nn.MSELoss(reduction="none")
@@ -274,9 +276,7 @@ class Train:
                                         resblocks=resblocks,
                                         h_last=self.out_channels[-1],
                                         )
-        model = model.to(device)
-        if self.flow_type != 'vanilla':
-            model.flow = model.flow.to(device)
+            model = model.to(device)
         # model.flow = model.flow.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
@@ -291,7 +291,7 @@ class Train:
             torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
             Normalize()
         ])
-        all_set = MRIDataset(self.path, transform=train_transform)
+        all_set = MRIDataset(self.path, transform=train_transform, device=device)
         train_set, valid_set = validation_split(all_set, val_share=self.val_share)
 
         train_loader = DataLoader(train_set,
@@ -383,10 +383,7 @@ class Train:
                 loss.backward()
                 # lr_schedule.step()
 
-                try:
-                    train_losses += [loss.item()]
-                except:
-                    return best_loss
+                train_losses += [loss.item()]
                 train_kld += [kl_div.item()]
                 train_recons += [loss_recon.item()]
 

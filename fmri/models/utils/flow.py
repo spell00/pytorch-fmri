@@ -114,14 +114,14 @@ class NormalizingFlows(nn.Module):
     """
     Presents a sequence of normalizing flows as a torch.nn.Module.
     """
-    def __init__(self, in_features, n_flows=1, h_last_dim=None, flow_type=PlanarNormalizingFlow):
+    def __init__(self, in_features, n_flows=1, h_last_dim=None, flow_type=PlanarNormalizingFlow, device='cuda'):
         self.h_last_dim = h_last_dim
         self.flows = []
         self.flows_a = []
         self.n_flows = n_flows
         self.flow_type = "nf"
         for i, features in enumerate(reversed(in_features)):
-            self.flows += [nn.ModuleList([flow_type(features) for _ in range(n_flows)])]
+            self.flows += [nn.ModuleList([flow_type(features).to(device) for _ in range(n_flows)])]
 
         super(NormalizingFlows, self).__init__()
 
@@ -138,7 +138,8 @@ class HouseholderFlow(nn.Module):
     """
     Presents a sequence of normalizing flows as a torch.nn.Module.
     """
-    def __init__(self, in_features, auxiliary, n_flows=1, h_last_dim=None, flow_type=HFlow, flow_flavour="hf"):
+    def __init__(self, in_features, auxiliary, n_flows=1, h_last_dim=None, flow_type=HFlow, flow_flavour="hf",
+                 device='cuda'):
         super(HouseholderFlow, self).__init__()
         self.flow_flavour = flow_flavour
         self.v_layers = [[] for _ in range(len(in_features))]
@@ -146,8 +147,8 @@ class HouseholderFlow(nn.Module):
         self.flow_type = "hf"
         flows = []
         for i, features in enumerate(reversed(in_features)):
-            flows += [flow_type()]
-            v_layers = [nn.Linear(h_last_dim, features)] + [nn.Linear(features, features) for _ in range(n_flows)]
+            flows += [flow_type().to(device)]
+            v_layers = [nn.Linear(h_last_dim, features).to(device)] + [nn.Linear(features, features).to(device) for _ in range(n_flows)]
             self.v_layers[i] = nn.ModuleList(v_layers)
         if not auxiliary:
             self.flows = nn.ModuleList(flows)
@@ -155,7 +156,6 @@ class HouseholderFlow(nn.Module):
             self.flows_a = nn.ModuleList(flows)
 
     def forward(self, z, h_last, auxiliary=False):
-        self
         v = {}
         z = {'0': z, '1': None}
         # Householder Flow:
@@ -177,7 +177,8 @@ class HouseholderFlow(nn.Module):
 
 
 class ccLinIAF(nn.Module):
-    def __init__(self, in_features, n_flows=1, h_last_dim=None, flow_flavour="ccLinIAF", auxiliary=False, flow_type=linIAF):
+    def __init__(self, in_features, n_flows=1, h_last_dim=None, flow_flavour="ccLinIAF", auxiliary=False,
+                 flow_type=linIAF, device='cuda'):
         super().__init__()
         self.n_combination = n_flows
         self.n_flows = n_flows
@@ -188,7 +189,7 @@ class ccLinIAF(nn.Module):
         encoder_L = []
 
         for i, features in enumerate(list(reversed(in_features))):
-            flows += [flow_type(features)]
+            flows += [flow_type(features).to(device)]
             combination_l += [CombinationL(features, self.n_combination)]
             encoder_y += [nn.Linear(h_last_dim, self.n_combination)]
             encoder_L += [nn.Linear(h_last_dim, (features ** 2) * self.n_combination)]
@@ -388,7 +389,7 @@ class IAF(nn.Module):
      Note that the size of h needs to be the same as h_size, which is the width of the MADE layers.
      """
 
-    def __init__(self, z_size, n_flows=2, num_hidden=0, h_size=50, forget_bias=1., conv3d=False):
+    def __init__(self, z_size, n_flows=2, num_hidden=0, h_size=50, forget_bias=1., conv3d=False, device='cuda'):
         super(IAF, self).__init__()
         self.z_size = z_size
         self.n_flows = n_flows
@@ -452,7 +453,8 @@ class IAF(nn.Module):
 
 
 class SylvesterFlows(nn.Module):
-    def __init__(self, in_features, flow_flavour, n_flows=1, h_last_dim=None, flow_type=Sylvester, auxiliary=None):
+    def __init__(self, in_features, flow_flavour, n_flows=1, h_last_dim=None, flow_type=Sylvester,
+                 auxiliary=None, device='cuda'):
         super(SylvesterFlows, self).__init__()
         self.flows = []
         self.h_last_dim = h_last_dim
@@ -465,7 +467,7 @@ class SylvesterFlows(nn.Module):
         # Normalizing flow layers
         for k in range(self.n_flows):
             for i in range(len(in_features)):
-                flow_k = flow_type(self.n_flows)
+                flow_k = flow_type(self.n_flows).to(device)
                 self.add_module('flow_' + str(k) + "_" + str(i) + "_" + str(auxiliary), flow_k)
 
     def forward(self, z, r1, r2, q_ortho, b, k=0, auxiliary=False):

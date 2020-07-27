@@ -138,6 +138,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                  gated=True,
                  has_dense=True,
                  resblocks=False,
+                 device='cuda'
                  ):
         super(Autoencoder3DCNN, self).__init__()
         resconv = []
@@ -256,15 +257,15 @@ class Autoencoder3DCNN(torch.nn.Module):
         self.flow_type = flow_type
         self.n_flows = n_flows
         if self.flow_type == "nf":
-            self.flow = NormalizingFlows(in_features=[z_dim], n_flows=n_flows)
+            self.flow = NormalizingFlows(in_features=[z_dim], n_flows=n_flows, device=device)
         if self.flow_type == "hf":
-            self.flow = HouseholderFlow(in_features=[z_dim], auxiliary=False, n_flows=n_flows, h_last_dim=z_dim)
+            self.flow = HouseholderFlow(in_features=[z_dim], auxiliary=False, n_flows=n_flows, h_last_dim=z_dim, device=device)
         if self.flow_type == "iaf":
-            self.flow = IAF(z_dim, n_flows=n_flows, num_hidden=n_flows, h_size=z_dim, forget_bias=1., conv3d=False)
+            self.flow = IAF(z_dim, n_flows=n_flows, num_hidden=n_flows, h_size=z_dim, forget_bias=1., conv3d=False, device=device)
         if self.flow_type == "ccliniaf":
-            self.flow = ccLinIAF(in_features=[z_dim], auxiliary=False, n_flows=n_flows, h_last_dim=z_dim)
+            self.flow = ccLinIAF(in_features=[z_dim], auxiliary=False, n_flows=n_flows, h_last_dim=z_dim, device=device)
         if self.flow_type == "o-sylvester":
-            self.flow = SylvesterFlows(in_features=[z_dim], flow_flavour='o-sylvester', n_flows=1, h_last_dim=None)
+            self.flow = SylvesterFlows(in_features=[z_dim], flow_flavour='o-sylvester', n_flows=1, h_last_dim=None, device=device)
 
     def random_init(self, func=nn.init.xavier_uniform_):
 
