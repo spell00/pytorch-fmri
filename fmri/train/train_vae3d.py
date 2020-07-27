@@ -275,7 +275,7 @@ class Train:
                                         h_last=self.out_channels[-1],
                                         )
         model = model.to(device)
-        if flow_type != 'vanilla':
+        if self.flow_type != 'vanilla':
             model.flow = model.flow.to(device)
         # model.flow = model.flow.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
