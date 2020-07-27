@@ -216,7 +216,7 @@ class Train:
                                  auxiliary=False,
                                  a_dim=0,
                                  )
-        model.to(device)
+        model = model.to(device)
         model.random_init()
         criterion = nn.MSELoss(reduction="none")
         if optimizer_type == 'adamw':
