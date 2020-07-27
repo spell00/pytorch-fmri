@@ -76,7 +76,8 @@ class Train:
                  std=0.5,
                  plot_perform=True,
                  val_share=0.1,
-                 activation=torch.nn.ReLU
+                 activation=torch.nn.ReLU,
+                 init_func=nn.init.xavier_uniform_
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -220,7 +221,7 @@ class Train:
                                  a_dim=0,
                                  device=device
                                  )
-        model.random_init()
+        model.random_init(func=self.init_func)
         criterion = nn.MSELoss(reduction="none")
         if optimizer_type == 'adamw':
             optimizer = torch.optim.AdamW(params=model.parameters(),
@@ -587,6 +588,7 @@ if __name__ == "__main__":
                      flow_type=flow_type,
                      save=save,
                      maxpool=maxpool,
+                     init_func=torch.nn.init.kaiming_uniform_
                      )
     best_parameters, values, experiment, model = optimize(
         parameters=[
