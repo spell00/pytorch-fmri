@@ -372,16 +372,16 @@ class Train:
                 ).sum() / self.batch_size
                 kl_div = torch.mean(kl)
                 loss = loss_recon + kl_div
-                # l2_reg = torch.Tensor([0])
-                # l1_reg = torch.Tensor([0])
-                # for name, param in model.named_parameters():
-                #     if 'weight' in name:
-                #         l1_reg = l1 + torch.norm(param, 1)
-                # for name, param in model.named_parameters():
-                #     if 'weight' in name:
-                #         l2_reg = l2 + torch.norm(param, 1)
-                # loss += l1 * l1_reg
-                # loss += l2 * l2_reg
+                l2_reg = torch.Tensor([0])
+                l1_reg = torch.Tensor([0])
+                for name, param in model.named_parameters():
+                    if 'weight' in name:
+                        l1_reg = l1 + torch.norm(param, 1)
+                for name, param in model.named_parameters():
+                    if 'weight' in name:
+                        l2_reg = l2 + torch.norm(param, 1)
+                loss += l1 * l1_reg
+                loss += l2 * l2_reg
                 loss.backward()
                 # lr_schedule.step()
 
