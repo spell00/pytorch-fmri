@@ -66,12 +66,13 @@ class GaussianSample(Stochastic):
     Gaussian distribution.
     """
 
-    def __init__(self, in_features, out_features):
+    def __init__(self, in_features, out_features, device):
         super(GaussianSample, self).__init__()
+        self.device = device
         self.in_features = in_features
         self.out_features = out_features
-        self.mu = nn.Linear(in_features, out_features)
-        self.log_var = nn.Linear(in_features, out_features)
+        self.mu = nn.Linear(in_features, out_features).to(device)
+        self.log_var = nn.Linear(in_features, out_features).to(device)
 
     def forward(self, x):
         mu = self.mu(x)
@@ -144,7 +145,7 @@ class Autoencoder3DCNN(torch.nn.Module):
         resconv = []
         resdeconv = []
         self.indices = [torch.Tensor() for _ in range(len(in_channels))]
-        self.GaussianSample = GaussianSample(z_dim, z_dim)
+        self.GaussianSample = GaussianSample(z_dim, z_dim, device)
         self.activation = activation()
         # self.swish = Swish()
 
