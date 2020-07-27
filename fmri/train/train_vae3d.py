@@ -409,13 +409,13 @@ class Train:
             #recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
             if 'views' not in os.listdir():
                 os.mkdir('views')
-            img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
-            recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
+            # img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
+            # recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
             losses["train"] += [np.mean(train_losses)]
             kl_divs["train"] += [np.mean(train_kld)]
             losses_recon["train"] += [np.mean(train_recons)]
             running_abs_error["train"] += [np.mean(train_abs_error)]
-            del img, recon,  train_losses, train_kld, train_recons, train_abs_error
+            del train_losses, train_kld, train_recons, train_abs_error # , img, recon
 
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 1:
