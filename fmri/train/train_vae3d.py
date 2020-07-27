@@ -287,7 +287,7 @@ class Train:
             torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
             Normalize()
         ])
-        all_set = MRIDataset(self.path, transform=train_transform)
+        all_set = MRIDataset(self.path, transform=train_transform, device=device)
         train_set, valid_set = validation_split(all_set, val_share=self.val_share)
 
         train_loader = DataLoader(train_set,
@@ -360,7 +360,6 @@ class Train:
             for i, images in enumerate(train_loader):
                 #    pbar.update(1)
                 model.zero_grad()
-                images = images.to(device).unsqueeze(1)
                 reconstruct, kl = model(images)
                 loss_recon = criterion(reconstruct, images).sum() / self.batch_size
                 kl_div = torch.mean(kl)
@@ -426,13 +425,7 @@ class Train:
             # pbar = tqdm(total=len(valid_loader))
             for i, images in enumerate(valid_loader):
                 #    pbar.update(1)
-                images = images.to(device).unsqueeze(1)
                 reconstruct, kl = model(images)
-                # reconstruct = reconstruct[:, :,
-                #               :images.shape[2],
-                #               :images.shape[3],
-                #               :images.shape[4]].squeeze(1)
-                # images = images.squeeze(1)
                 loss_recon = criterion(reconstruct, images).sum()
                 kl_div = torch.mean(kl)
                 if epoch < warmup:
@@ -554,7 +547,7 @@ if __name__ == "__main__":
     n_flows = 10
     bs = 8
     maxpool = 2
-    flow_type = 'hf'
+    flow_type = 'nf'
     epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True

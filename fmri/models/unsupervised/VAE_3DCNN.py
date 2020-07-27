@@ -171,7 +171,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                     ),
                     nn.BatchNorm3d(num_features=outs),
                     activation(),
-                    nn.Dropout3d(0.5),
+                    nn.Dropout(0.5),
                 ]
             else:
                 layers_list += [
@@ -185,7 +185,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                 ),
                     nn.BatchNorm3d(num_features=outs),
                     activation(),
-                    nn.Dropout3d(0.5),
+                    nn.Dropout(0.5),
                 ]
             if resblocks and i < len(in_channels) - 1:
                 for _ in range(n_res):
@@ -193,7 +193,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                         ResBlock(outs, outs, activation),
                         nn.BatchNorm3d(num_features=outs),
                         activation(),
-                        nn.Dropout3d(0.5)
+                        nn.Dropout(0.5)
                     ]
 
             self.resconv += [nn.Sequential(*layers_list)]
@@ -214,7 +214,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                                          dilation=dilats),
                                 nn.BatchNorm3d(num_features=outs),
                                 activation(),
-                                nn.Dropout3d(0.5),
+                                nn.Dropout(0.5),
                                 ]
             else:
                 layers_list += [GatedConvTranspose3d(input_channels=ins,
@@ -227,7 +227,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                                      ),
                                 nn.BatchNorm3d(num_features=outs),
                                 activation(),
-                                nn.Dropout3d(0.5),
+                                nn.Dropout(0.5),
                                 ]
             if resblocks and i < len(in_channels) - 1:
                 for _ in range(n_res):
@@ -235,7 +235,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                         ResBlockDeconv(outs, outs, activation),
                         nn.BatchNorm3d(num_features=outs),
                         activation(),
-                        nn.Dropout3d(0.5)
+                        nn.Dropout(0.5)
                     ]
             self.resdeconv += [nn.Sequential(*layers_list)]
 
@@ -346,7 +346,7 @@ class Autoencoder3DCNN(torch.nn.Module):
         rec = self.decoder(z)
         return rec, kl
 
-    def sample(self, z, y=None):
+    def sample(self, z):
         """
         Given z ~ N(0, I) generates a sample from
         the learned distribution based on p_θ(x|z).
