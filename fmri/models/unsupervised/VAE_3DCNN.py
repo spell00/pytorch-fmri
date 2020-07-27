@@ -244,12 +244,12 @@ class Autoencoder3DCNN(torch.nn.Module):
             nn.Linear(in_features=out_channels[-1], out_features=z_dim),
             nn.BatchNorm1d(num_features=z_dim),
             nn.Dropout(0.5)
-        )
+        ).to(device)
         self.dense2 = nn.Sequential(
             nn.Linear(in_features=z_dim, out_features=out_channels[-1]),
             nn.BatchNorm1d(num_features=out_channels[-1]),
             nn.Dropout(0.5)
-        )
+        ).to(device)
         self.maxpool = nn.MaxPool3d(maxpool, return_indices=True).to(device)
         self.maxunpool = nn.MaxUnpool3d(maxpool).to(device)
         self.resconv = nn.ModuleList(resconv).to(device)
