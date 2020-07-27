@@ -45,10 +45,10 @@ class SylvesterVAE(Autoencoder3DCNN):
                  h_last,
                  n_flows,
                  n_res,
+                 device,
                  num_elements=3,
                  auxiliary=False,
-                 a_dim=0,
-                 device='cuda'
+                 a_dim=0
                  ):
         super(SylvesterVAE, self).__init__(z_dim,
                                            maxpool,
@@ -63,14 +63,15 @@ class SylvesterVAE(Autoencoder3DCNN):
                                            padding,
                                            padding_deconv,
                                            batchnorm,
+                                           device=device,
                                            flow_type=flow_type,
                                            n_flows=n_flows,
                                            n_res=n_res,
                                            gated=gated,
                                            has_dense=has_dense,
                                            resblocks=resblocks,
-                                           activation=torch.nn.GELU,
-                                           device='cuda'
+                                           activation=torch.nn.GELU
+
                                            )
         # Initialize log-det-jacobian to zero
         self.auxiliary = auxiliary

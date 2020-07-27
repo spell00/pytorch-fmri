@@ -554,7 +554,7 @@ if __name__ == "__main__":
     n_flows = 10
     bs = 8
     maxpool = 2
-    flow_type = 'hf'
+    flow_type = 'o-sylvester'
     epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True
