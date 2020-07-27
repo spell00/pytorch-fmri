@@ -298,7 +298,7 @@ class Train:
         valid_loader = DataLoader(valid_set,
                                   num_workers=0,
                                   shuffle=False,
-                                  batch_size=1,
+                                  batch_size=2,
                                   drop_last=False)
 
         # Get shared output_directory ready
@@ -360,8 +360,6 @@ class Train:
             for i, images in enumerate(train_loader):
                 #    pbar.update(1)
                 model.zero_grad()
-                if self.batch_size == 1:
-                    images = images.unsqueeze(0)
                 images = images.to(device).unsqueeze(1)
                 reconstruct, kl = model(images)
                 loss_recon = criterion(reconstruct, images).sum() / self.batch_size
@@ -428,8 +426,6 @@ class Train:
             # pbar = tqdm(total=len(valid_loader))
             for i, images in enumerate(valid_loader):
                 #    pbar.update(1)
-                if self.batch_size == 1:
-                    images = images.unsqueeze(0)
                 images = images.to(device).unsqueeze(1)
                 reconstruct, kl = model(images)
                 # reconstruct = reconstruct[:, :,
