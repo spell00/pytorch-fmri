@@ -112,6 +112,7 @@ class Train:
         self.val_share = val_share
         self.plot_perform = plot_perform
         self.activation = activation
+        self.init_func = init_func
 
     def train(self, params):
         num_elements = params['num_elements']
