@@ -250,8 +250,8 @@ class Autoencoder3DCNN(torch.nn.Module):
             nn.BatchNorm1d(num_features=out_channels[-1]),
             nn.Dropout(0.5)
         )
-        self.maxpool = nn.MaxPool3d(maxpool, return_indices=True)
-        self.maxunpool = nn.MaxUnpool3d(maxpool)
+        self.maxpool = nn.MaxPool3d(maxpool, return_indices=True).to(device)
+        self.maxunpool = nn.MaxUnpool3d(maxpool).to(device)
         self.resconv = nn.ModuleList(resconv).to(device)
         self.resdeconv = nn.ModuleList(resdeconv).to(device)
         self.flow_type = flow_type
