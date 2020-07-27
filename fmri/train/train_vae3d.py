@@ -190,7 +190,7 @@ class Train:
                                      gated=self.gated,
                                      resblocks=self.resblocks,
                                      activation=self.activation
-                                     ).to(device)
+                                     )
         else:
             model = SylvesterVAE(z_dim=z_dim,
                                  maxpool=self.maxpool,
@@ -215,7 +215,7 @@ class Train:
                                  num_elements=3,
                                  auxiliary=False,
                                  a_dim=0,
-                                 ).to(device)
+                                 )
         model.random_init()
         criterion = nn.MSELoss(reduction="none")
         if optimizer_type == 'adamw':
@@ -272,7 +272,7 @@ class Train:
                                         resblocks=resblocks,
                                         h_last=self.out_channels[-1],
                                         )
-            model = model.to(device)
+        model = model.to(device)
         model.flow = model.flow.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
@@ -347,7 +347,6 @@ class Train:
                     print('EARLY STOPPING.')
                 break
             best_epoch = False
-            model.train()
             train_losses = []
             train_abs_error = []
             train_kld = []
