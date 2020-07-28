@@ -426,7 +426,7 @@ class Train:
                 model.zero_grad()
                 images = batch
                 images = torch.autograd.Variable(images).cuda()
-                images = images.unsqueeze(1)
+                # images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
                 reconstruct = reconstruct[:, :,
                               :images.shape[2],
@@ -514,7 +514,7 @@ class Train:
                 #    pbar.update(1)
                 images = batch
                 images = images.cuda()
-                images = images.unsqueeze(1)
+                # images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
                 reconstruct = reconstruct[:, :,
                               :images.shape[2],
