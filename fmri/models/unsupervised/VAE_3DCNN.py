@@ -89,9 +89,9 @@ class GaussianSample(Stochastic):
 
 
 class ResBlock(nn.Module):
-    def __init__(self, in_channel, channel):
+    def __init__(self, in_channel, channel, device):
         super().__init__()
-
+        self.device = device
         self.conv = nn.Sequential(
             nn.GELU(),
             nn.Conv3d(in_channel, channel, 3, padding=1),
@@ -100,16 +100,16 @@ class ResBlock(nn.Module):
         )
         self.conv.apply(random_init)
     def forward(self, input):
-        out = self.conv(input)
+        out = self.conv.to(self.device)(input)
         out += input
 
         return out
 
 
 class ResBlockDeconv(nn.Module):
-    def __init__(self, in_channel, channel):
+    def __init__(self, in_channel, channel, device):
         super().__init__()
-
+        self.device = device
         self.conv = nn.Sequential(
             nn.GELU(),
             nn.ConvTranspose3d(in_channel, channel, 1),
@@ -119,7 +119,7 @@ class ResBlockDeconv(nn.Module):
         self.conv.apply(random_init)
 
     def forward(self, input):
-        out = self.conv(input)
+        out = self.conv.to(self.device)(input)
         out += input
 
         return out
@@ -155,7 +155,7 @@ class Autoencoder3DCNN(torch.nn.Module):
         else:
             device = 'cpu'
 
-
+        self.device = device
         self.conv_layers = []
         self.deconv_layers = []
         self.bns = []
@@ -299,13 +299,13 @@ class Autoencoder3DCNN(torch.nn.Module):
                 for _ in range(self.n_res):
                     if self.batchnorm:
                         if x.shape[0] != 1:
-                            x = self.bns[i - 1](x)
+                            x = self.bns[i - 1].to(self.device)(x)
                     x = self.resconv[j](x)
                     j += 1
             x = self.conv_layers[i](x)
             if self.batchnorm:
                 if x.shape[0] != 1:
-                    x = self.bns[i](x)
+                    x = self.bns[i].to(self.device)(x)
             x = self.activation(x)
             x = self.dropout(x)
             x, self.indices[i] = self.maxpool(x)
@@ -336,7 +336,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                 for _ in range(self.n_res):
                     if self.batchnorm:
                         if x.shape[0] != 1:
-                            x = self.bns_deconv[i - 1](x)
+                            x = self.bns_deconv[i - 1].to(self.device)(x)
                     x = self.resdeconv[j](x)
                     j += 1
             ind = self.indices[len(self.indices) - 1 - i]
@@ -345,7 +345,7 @@ class Autoencoder3DCNN(torch.nn.Module):
             if i < len(self.deconv_layers) - 1:
                 if self.batchnorm:
                     if x.shape[0] != 1:
-                        x = self.bns_deconv[i](x)
+                        x = self.bns_deconv[i].to(self.device)(x)
                 x = self.activation(x)
                 x = self.dropout(x)
 
