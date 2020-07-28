@@ -363,7 +363,7 @@ class Train:
             mode = 'valid'
             if (losses[mode][-1] < best_loss or best_loss == -1) and not np.isnan(losses[mode][-1]):
                 if self.verbose > 1:
-                    print('BEST EPOCH!', losses[mode][-1])
+                    print('BEST EPOCH!', losses[mode][-1], accuracies[mode][-1])
                 early_stop_counter = 0
                 best_loss = losses[mode][-1]
                 best_epoch = True
