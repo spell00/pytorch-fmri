@@ -197,7 +197,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                 )]
             if resblocks and i != 0:
                 for _ in range(n_res):
-                    self.resconv += [ResBlock(ins, outs)]
+                    self.resconv += [ResBlock(ins, outs, device)]
             self.bns += [nn.BatchNorm3d(num_features=outs)]
 
         for i, (ins, outs, ksize, stride, dilats, pad) in enumerate(zip(reversed(out_channels),
@@ -218,7 +218,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                                             )]
             if resblocks and i != 0:
                 for _ in range(n_res):
-                    self.resdeconv += [ResBlockDeconv(ins, outs)]
+                    self.resdeconv += [ResBlockDeconv(ins, outs, device)]
 
             self.bns_deconv += [nn.BatchNorm3d(num_features=outs)]
 
