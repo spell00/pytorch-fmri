@@ -47,8 +47,8 @@ class MRIDataset(Dataset):
         x = nib.load(self.path + x).dataobj
         x = np.array(x)
         # x = _resize_data(x, (self.size, self.size, self.size))
-        x = torch.Tensor(x).to(self.device)
-        x.requires_grad = False
+        x = torch.Tensor(x) # .to(self.device)
+        # x.requires_grad = False
         if self.transform:
             x = self.transform(x)
         return x.unsqueeze(0)

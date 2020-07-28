@@ -30,6 +30,29 @@ import nibabel as nib
 from fmri.utils.utils import validation_split
 
 
+def swish(x):
+    return x * x.sigmoid()
+
+
+def mish(x):
+    return x * F.softplus(x).tanh()
+
+
+class Swish(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return swish(x)
+
+
+class Mish(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return mish(x)
+
 def load_subject(filename, mask_img):
     subject_data = None
     with h5py.File(filename, 'r') as f:
@@ -126,6 +149,8 @@ class Train:
                  padding,
                  padding_deconv,
                  path,
+                 init_func=torch.nn.init.kaiming_uniform_,
+                 activation=torch.nn.GELU,
                  num_elements=0,
                  batch_size=8,
                  epochs=1000,
@@ -176,10 +201,17 @@ class Train:
         self.size = size
         self.std = std
         self.mean = mean
+        self.activation = activation
+        self.init_func = init_func
         self.val_share = val_share
         self.plot_perform = plot_perform
 
     def train(self, params):
+        if torch.cuda.is_available():
+            device = 'cuda'
+        else:
+            device = 'cpu'
+
         num_elements = params['num_elements']
         mom_range = params['mom_range']
         n_res = params['n_res']
@@ -253,7 +285,7 @@ class Train:
                                      n_res=n_res,
                                      gated=self.gated,
                                      resblocks=self.resblocks
-                                     ).cuda()
+                                     ).to(device)
         else:
             model = SylvesterVAE(z_dim=z_dim,
                                  maxpool=self.maxpool,
@@ -336,7 +368,7 @@ class Train:
                                         resblocks=resblocks,
                                         h_last=self.out_channels[-1],
                                         )
-        model = model.cuda()
+        model = model.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
 
@@ -425,7 +457,7 @@ class Train:
                 #    pbar.update(1)
                 model.zero_grad()
                 images = batch
-                images = torch.autograd.Variable(images).cuda()
+                images = torch.autograd.Variable(images).to(device)
                 # images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
                 reconstruct = reconstruct[:, :,
@@ -463,7 +495,7 @@ class Train:
                 train_recons += [loss_recon.item()]
                 train_abs_error += [
                     float(torch.mean(torch.abs_(
-                        reconstruct - images.cuda()
+                        reconstruct - images.to(device)
                     )).item())
                 ]
 
@@ -513,7 +545,7 @@ class Train:
             for i, batch in enumerate(valid_loader):
                 #    pbar.update(1)
                 images = batch
-                images = images.cuda()
+                images = images.to(device)
                 # images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
                 reconstruct = reconstruct[:, :,
@@ -523,7 +555,7 @@ class Train:
                 images = images.squeeze(1)
                 loss_recon = criterion(
                     reconstruct,
-                    images.cuda()
+                    images.to(device)
                 ).sum()
                 kl_div = torch.mean(kl)
                 if epoch < warmup:
@@ -535,7 +567,7 @@ class Train:
                     return best_loss
                 valid_kld += [kl_div.item()]
                 valid_recons += [loss_recon.item()]
-                valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.cuda())).item())]
+                valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.to(device))).item())]
                 logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
             losses["valid"] += [np.mean(valid_losses)]
             kl_divs["valid"] += [np.mean(valid_kld)]
@@ -628,19 +660,19 @@ if __name__ == "__main__":
 
     random.seed(10)
 
-    size = 33
+    size = 32
     z_dim = 50
-    in_channels = [1, 64, 128, 128, 128, 256, 256]
-    out_channels = [64, 128, 128, 128, 256, 256, 256]
-    kernel_sizes = [3, 3, 3, 3, 3, 3, 3]
-    kernel_sizes_deconv = [3, 3, 3, 3, 3, 3, 3]
-    strides = [1, 1, 1, 1, 1, 1, 1]
-    strides_deconv = [1, 1, 1, 1, 1, 1, 1]
-    dilatations = [1, 1, 1, 1, 1, 1, 1]
-    dilatations_Deconv = [1, 1, 1, 1, 1, 1, 1]
-    paddings = [2, 2, 2, 2, 2, 2, 1]
-    paddings_deconv = [1, 1, 1, 1, 1, 1, 1]
-    dilatations_deconv = [1, 1, 1, 1, 1, 1, 1]
+    in_channels = [1, 32, 64, 128, 256]
+    out_channels = [32, 64, 128, 256, 256]
+    kernel_sizes = [3, 3, 3, 3, 3]
+    kernel_sizes_deconv = [3, 3, 3, 3, 3]
+    strides = [1, 1, 1, 1, 1]
+    strides_deconv = [1, 1, 1, 1, 1]
+    dilatations = [1, 1, 1, 1, 1]
+    dilatations_Deconv = [1, 1, 1, 1, 1, 1]
+    paddings = [1, 1, 1, 1, 1]
+    paddings_deconv = [1, 1, 1, 1, 1]
+    dilatations_deconv = [1, 1, 1, 1, 1]
     n_flows = 10
     bs = 8
     maxpool = 2
@@ -651,8 +683,8 @@ if __name__ == "__main__":
     gated = False
     resblocks = True
     checkpoint_path = "checkpoints"
-    basedir = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
-    path = basedir + '33x33/'
+    basedir = '/Users/simonpelletier/Downloads/images3d/t1/'
+    path = basedir + '32x32/'
 
     n_epochs = 10000
     save = False
@@ -678,6 +710,8 @@ if __name__ == "__main__":
                      flow_type=flow_type,
                      save=save,
                      maxpool=maxpool,
+                     activation=Swish,
+                     init_func=torch.nn.init.kaiming_uniform_
                      )
     best_parameters, values, experiment, model = optimize(
         parameters=[

@@ -70,6 +70,11 @@ class SylvesterVAE(Autoencoder3DCNN):
                                            resblocks=resblocks,
                                            )
         # Initialize log-det-jacobian to zero
+        if torch.cuda.is_available():
+            device = 'cuda'
+        else:
+            device = 'cpu'
+        self.device = device
         self.auxiliary = auxiliary
         self.log_det_j = 0.
         # Flow parameters
@@ -225,7 +230,6 @@ class SylvesterVAE(Autoencoder3DCNN):
                 if self.auxiliary:
                     name_aux = 'flow_' + str(k) + "_" + str(i) + "_" + str(True)
                     self.add_module(name_aux, flow_k_a)
-        self.cuda()
 
     def batch_construct_orthogonal(self, q, auxiliary, i=-1):
         """
@@ -350,8 +354,8 @@ class SylvesterVAE(Autoencoder3DCNN):
 
         batch_size = x.size(0)
         if auxiliary:
-            (z_q, mean_z, var_z), h = self.aux_encoder(x, y=torch.FloatTensor([]).cuda(),
-                                                       a=torch.FloatTensor([]).cuda(),
+            (z_q, mean_z, var_z), h = self.aux_encoder(x, y=torch.FloatTensor([]).to(self.device),
+                                                       a=torch.FloatTensor([]).to(self.device),
                                                        input_shape=self.input_shape)
         else:
             # n = int(torch.prod(torch.Tensor(self.input_shape)))
@@ -361,11 +365,11 @@ class SylvesterVAE(Autoencoder3DCNN):
             except:
                 z = self.encoder(x)
                 if self.flow_type == "o-sylvester":
-                    mean_z, var_z = torch.mean(z, 0).view(-1, 1), torch.var(z, 0).view(-1, 1).cuda()
+                    mean_z, var_z = torch.mean(z, 0).view(-1, 1), torch.var(z, 0).view(-1, 1).to(self.device)
                     z1 = z
                 else:
                     z1 = torch.transpose(torch.Tensor(z), 0, 1)
-                    mean_z, var_z = torch.mean(z1, 0).view(-1, 1).cuda(), torch.var(z1, 0).view(-1, 1).cuda()
+                    mean_z, var_z = torch.mean(z1, 0).view(-1, 1).to(self.device), torch.var(z1, 0).view(-1, 1).to(self.device)
                 # self.kl_divergence = -torch.sum(self._kld(z1, q2, i=0, h_last=h))
                 z_q = z1
 
@@ -394,7 +398,7 @@ class SylvesterVAE(Autoencoder3DCNN):
             b = b.reshape(batch_size, 1, last, self.n_flows)
 
             if self.flow_type == "h-sylvester":
-                q = amor_q[i].cuda()(z)
+                q = amor_q[i].to(self.device)(z)
             else:
                 q = None
         else:
@@ -408,11 +412,14 @@ class SylvesterVAE(Autoencoder3DCNN):
 
         return (mean_z, var_z, r1, r2, q, b), x, z_q
 
-    def forward(self, x, y=torch.Tensor([]).cuda(), a=torch.Tensor([]).cuda(), k=0, auxiliary=False):
+    def forward(self, x, y=torch.Tensor([]), a=torch.Tensor([]), k=0, auxiliary=False):
         """
         Forward pass with orthogonal sylvester flows for the transformation z_0 -> z_1 -> ... -> z_k.
         Log determinant is computed as log_det_j = N E_q_z0[\sum_k log |det dz_k/dz_k-1| ].
         """
+
+        y = y.to(self.device)
+        a = a.to(self.device)
         self.log_det_j = 0.
         log_det_jacobian = 0
         (z_mu, z_var, r1, r2, q, b), x, z_q = self.encode(x, y, a, auxiliary=auxiliary, i=k)
@@ -471,12 +478,13 @@ class SylvesterVAE(Autoencoder3DCNN):
         return x_mean, self.kl_divergence
         # return x_mean, z_mu, z_var, self.log_det_j, z[0], z[-1]
 
-    def run_sylvester(self, x, y=torch.Tensor([]).cuda(), a=torch.Tensor([]).cuda(), k=0, auxiliary=False,
-                      exception=False):
+    def run_sylvester(self, x, y=torch.Tensor([]), a=torch.Tensor([]), k=0, auxiliary=False, exception=False):
         """
         Forward pass with orthogonal sylvester flows for the transformation z_0 -> z_1 -> ... -> z_k.
         Log determinant is computed as log_det_j = N E_q_z0[\sum_k log |det dz_k/dz_k-1| ].
         """
+        y = y.to(self.device)
+        a = a.to(self.device)
         if len(x.shape) == 3:
             x = x.view(-1, self.input_shape[0], self.input_shape[1], self.input_shape[2])
         self.log_det_j = 0.
