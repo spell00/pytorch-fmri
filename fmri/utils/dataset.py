@@ -48,7 +48,7 @@ class MRIDataset(Dataset):
         x = np.array(x)
         # x = _resize_data(x, (self.size, self.size, self.size))
         x = torch.Tensor(x).to(self.device)
-        x.requires_grad = True
+        x.requires_grad = False
         if self.transform:
             x = self.transform(x)
         return x.unsqueeze(0)
@@ -131,7 +131,7 @@ def load_checkpoint(checkpoint_path,
     checkpoint_dict = torch.load(checkpoint_path + '/' + name, map_location='cpu')
     epoch = checkpoint_dict['epoch']
     best_loss = checkpoint_dict['best_loss']
-    # optimizer.load_state_dict(checkpoint_dict['optimizer'])
+    optimizer.load_state_dict(checkpoint_dict['optimizer'])
     model_for_loading = checkpoint_dict['model']
     model.load_state_dict(model_for_loading.state_dict())
     losses_recon = checkpoint_dict['losses_recon']

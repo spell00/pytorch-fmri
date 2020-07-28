@@ -71,8 +71,8 @@ class Train:
                  maxpool=3,
                  verbose=2,
                  size=32,
-                 mean=0.5,
-                 std=0.5,
+                 mean=0.09477084164230691,
+                 std=0.11778934986433932,
                  plot_perform=True,
                  val_share=0.1,
                  activation=torch.nn.ReLU,
@@ -221,7 +221,7 @@ class Train:
                                  a_dim=0,
                                  device=device
                                  )
-        model.random_init(func=self.init_func)
+        # model.random_init(func=self.init_func)
         criterion = nn.MSELoss(reduction="none")
         if optimizer_type == 'adamw':
             optimizer = torch.optim.AdamW(params=model.parameters(),
@@ -289,7 +289,7 @@ class Train:
             Flip90(),
             Flip180(),
             Flip270(),
-            torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
+            torchvision.transforms.Normalize(mean=self.mean, std=self.std),
             Normalize()
         ])
         all_set = MRIDataset(self.path, transform=train_transform, device=device)
@@ -299,13 +299,11 @@ class Train:
                                   num_workers=0,
                                   shuffle=True,
                                   batch_size=self.batch_size,
-                                  pin_memory=False,
                                   drop_last=True)
         valid_loader = DataLoader(valid_set,
                                   num_workers=0,
                                   shuffle=True,
                                   batch_size=2,
-                                  pin_memory=False,
                                   drop_last=True)
 
         # Get shared output_directory ready
@@ -540,8 +538,8 @@ if __name__ == "__main__":
 
     size = 32
     z_dim = 50
-    in_channels = [1, 64, 128, 128, 128]
-    out_channels = [64, 128, 128, 128, 128]
+    in_channels = [1, 32, 64, 128, 256]
+    out_channels = [32, 64, 128, 256, 256]
     kernel_sizes = [3, 3, 3, 3, 3]
     kernel_sizes_deconv = [3, 3, 3, 3, 3]
     strides = [1, 1, 1, 1, 1]
@@ -552,13 +550,13 @@ if __name__ == "__main__":
     paddings_deconv = [1, 1, 1, 1, 1]
     dilatations_deconv = [1, 1, 1, 1, 1]
     n_flows = 10
-    bs = 8
+    bs = 2
     maxpool = 2
     flow_type = 'o-sylvester'
     epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True
-    gated = False
+    gated = True
     resblocks = True
     checkpoint_path = "checkpoints"
     basedir = '/Users/simonpelletier/Downloads/images3d/t1/'

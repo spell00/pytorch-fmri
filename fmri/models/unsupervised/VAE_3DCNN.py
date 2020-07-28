@@ -268,7 +268,6 @@ class Autoencoder3DCNN(torch.nn.Module):
             self.flow = SylvesterFlows(in_features=[z_dim], flow_flavour='o-sylvester', n_flows=1, h_last_dim=None, device=device)
 
     def random_init(self, func=nn.init.xavier_uniform_):
-
         for m in self.modules():
             if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
                 func(m.weight.data)
