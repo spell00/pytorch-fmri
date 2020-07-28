@@ -198,25 +198,25 @@ class Train:
                                         padding=self.padding,
                                         has_dense=self.has_dense,
                                         batchnorm=self.batchnorm,
-                                        flow_type=self.flow_type,
-                                        padding_deconv=self.padding_deconv,
+                                        flow_type=None,
+                                        padding_deconv=None,
                                         optimizer=optimizer,
                                         z_dim=self.n_classes,
                                         gated=self.gated,
                                         in_channels=self.in_channels,
                                         out_channels=self.out_channels,
                                         kernel_sizes=self.kernel_sizes,
-                                        kernel_sizes_deconv=self.kernel_sizes_deconv,
+                                        kernel_sizes_deconv=None,
                                         strides=self.strides,
-                                        strides_deconv=self.strides_deconv,
+                                        strides_deconv=None,
                                         dilatations=self.dilatations,
-                                        dilatations_deconv=self.dilatations_deconv,
+                                        dilatations_deconv=None,
                                         name=self.modelname,
                                         n_flows=n_flows,
                                         n_res=n_res,
                                         resblocks=resblocks,
-                                        h_last=self.out_channels[-1],
-                                        n_elements=self.num_elements
+                                        h_last=None,
+                                        n_elements=None
                                         )
         model = model.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
@@ -281,7 +281,7 @@ class Train:
             "valid": len(valid_set),
         }
         early_stop_counter = 0
-
+        print("Training Started on device:", device)
         for epoch in range(epoch_offset, self.epochs):
             if early_stop_counter == 500:
                 if self.verbose > 0:
