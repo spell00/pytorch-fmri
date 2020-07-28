@@ -12,6 +12,14 @@ out_channels = None
 kernel_sizes = None
 strides = None
 
+
+def random_init(m, init_func=torch.nn.init.kaiming_uniform_):
+    if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
+        init_func(m.weight.data)
+        if m.bias is not None:
+            m.bias.data.zero_()
+
+
 def swish(x):
     return x * x.sigmoid()
 
@@ -90,7 +98,7 @@ class ResBlock(nn.Module):
             nn.GELU(),
             nn.Conv3d(channel, in_channel, 1),
         )
-
+        self.conv.apply(random_init)
     def forward(self, input):
         out = self.conv(input)
         out += input
@@ -108,6 +116,7 @@ class ResBlockDeconv(nn.Module):
             nn.GELU(),
             nn.ConvTranspose3d(channel, in_channel, 3, padding=1),
         )
+        self.conv.apply(random_init)
 
     def forward(self, input):
         out = self.conv(input)
@@ -140,6 +149,13 @@ class Autoencoder3DCNN(torch.nn.Module):
                  resblocks=False,
                  ):
         super(Autoencoder3DCNN, self).__init__()
+
+        if torch.cuda.is_available():
+            device = 'cuda'
+        else:
+            device = 'cpu'
+
+
         self.conv_layers = []
         self.deconv_layers = []
         self.bns = []
@@ -215,6 +231,10 @@ class Autoencoder3DCNN(torch.nn.Module):
         self.maxunpool = nn.MaxUnpool3d(maxpool)
         self.conv_layers = nn.ModuleList(self.conv_layers)
         self.deconv_layers = nn.ModuleList(self.deconv_layers)
+        self.bns = nn.ModuleList(self.bns)
+        self.bns_deconv = nn.ModuleList(self.bns_deconv)
+        self.resconv = nn.ModuleList(self.resconv)
+        self.resdeconv = nn.ModuleList(self.resdeconv)
         self.flow_type = flow_type
         self.n_flows = n_flows
         if self.flow_type == "nf":

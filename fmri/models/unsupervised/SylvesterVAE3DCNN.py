@@ -22,6 +22,11 @@ z_dim,
 
 '''
 
+def random_init(m, init_func=torch.nn.init.kaiming_uniform_):
+    if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
+        init_func(m.weight.data)
+        if m.bias is not None:
+            m.bias.data.zero_()
 
 class SylvesterVAE(Autoencoder3DCNN):
     def __init__(self,
@@ -126,6 +131,8 @@ class SylvesterVAE(Autoencoder3DCNN):
                 nn.Linear(self.h_last, self.n_flows * self.num_elements),
                 self.diag_activation
             )
+            self.amor_diag1.apply(random_init)
+            self.amor_diag2.apply(random_init)
             self.amor_b = nn.Linear(self.h_last, self.n_flows * self.num_elements)
             if len(self.z_dims) > 1:
                 self.amor_q = [nn.Linear(self.h_last, self.n_flows * z_dim * self.num_elements) for z_dim in
@@ -164,6 +171,8 @@ class SylvesterVAE(Autoencoder3DCNN):
                 nn.Linear(self.h_last, self.n_flows * self.z_dim_last),
                 self.diag_activation
             )
+            self.amor_diag1.apply(random_init)
+            self.amor_diag2.apply(random_init)
             self.amor_b = nn.Linear(self.h_last, self.n_flows * self.z_dim_last)
             if self.flow_type == "h-sylvester":
                 self.amor_q = [nn.Linear(self.h_last, self.n_flows * z_dim * self.num_elements) for z_dim in
