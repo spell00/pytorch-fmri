@@ -5,13 +5,6 @@ from torch.autograd import Variable
 from fmri.models.utils.masked_layer import MaskedConv3d, MaskedLinear
 
 
-def random_init(m, func=nn.init.xavier_uniform_):
-    if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
-        func(m.weight.data)
-        if m.bias is not None:
-            m.bias.data.zero_()
-
-
 class PlanarNormalizingFlow(nn.Module):
     """
     Planar normalizing flow [Rezende & Mohamed 2015].
@@ -86,8 +79,8 @@ class linIAF(nn.Module):
         lt_mask = torch.tril(torch.ones(self.z_dim, self.z_dim), -1)  # lower-triangular mask matrix (1s in lower triangular part)
         I = Variable(torch.eye(self.z_dim, self.z_dim).expand(l_matrix.size(0), self.z_dim, self.z_dim))
         if self.cuda:
-            lt_mask = lt_mask
-            I = I
+            lt_mask = lt_mask.cuda()
+            I = I.cuda()
         lt_mask = Variable(lt_mask)
         lt_mask = lt_mask.unsqueeze(0).expand(l_matrix.size(0), self.z_dim, self.z_dim)  # 1 x L x L -> B x L x L
         lt = torch.mul(l_matrix, lt_mask) + I  # here we get a batch of lower-triangular matrices with ones on diagonal
@@ -121,15 +114,15 @@ class NormalizingFlows(nn.Module):
     """
     Presents a sequence of normalizing flows as a torch.nn.Module.
     """
-    def __init__(self, in_features, n_flows=1, h_last_dim=None, flow_type=PlanarNormalizingFlow, device='cuda'):
+    def __init__(self, in_features, n_flows=1, h_last_dim=None, flow_type=PlanarNormalizingFlow):
         self.h_last_dim = h_last_dim
         self.flows = []
         self.flows_a = []
         self.n_flows = n_flows
         self.flow_type = "nf"
         for i, features in enumerate(reversed(in_features)):
-            self.flows += [nn.ModuleList([flow_type(features).to(device) for _ in range(n_flows)])]
-            self.flows[-1].apply(random_init)
+            self.flows += [nn.ModuleList([flow_type(features).cuda() for _ in range(n_flows)])]
+
         super(NormalizingFlows, self).__init__()
 
     def forward(self, z, i=0):
@@ -145,37 +138,36 @@ class HouseholderFlow(nn.Module):
     """
     Presents a sequence of normalizing flows as a torch.nn.Module.
     """
-    def __init__(self, in_features, auxiliary, n_flows=1, h_last_dim=None, flow_type=HFlow, flow_flavour="hf",
-                 device='cuda'):
+    def __init__(self, in_features, auxiliary, n_flows=1, h_last_dim=None, flow_type=HFlow, flow_flavour="hf"):
         super(HouseholderFlow, self).__init__()
         self.flow_flavour = flow_flavour
-        self.v_layers = nn.ModuleList()
+        self.v_layers = [[] for _ in range(len(in_features))]
         self.n_flows = n_flows
         self.flow_type = "hf"
         flows = []
         for i, features in enumerate(reversed(in_features)):
-            flows += [flow_type().to(device)]
-            v_layers = [nn.Linear(h_last_dim, features).to(device)] + [nn.Linear(features, features).to(device) for _ in range(n_flows)]
-            v_layers = nn.ModuleList(v_layers).apply(random_init)
-            self.v_layers += [v_layers]
+            flows += [flow_type().cuda()]
+            v_layers = [nn.Linear(h_last_dim, features)] + [nn.Linear(features, features) for _ in range(n_flows)]
+            self.v_layers[i] = nn.ModuleList(v_layers)
         if not auxiliary:
             self.flows = nn.ModuleList(flows)
         else:
             self.flows_a = nn.ModuleList(flows)
 
     def forward(self, z, h_last, auxiliary=False):
+        self.cuda()
         v = {}
         z = {'0': z, '1': None}
         # Householder Flow:
         if self.n_flows > 0:
-            v['1'] = self.v_layers[0][0](h_last)
+            v['1'] = self.v_layers[0][0].cuda()(h_last)
             if not auxiliary:
                 z['1'] = self.flows[0](v['1'], z['0'])
             else:
                 z['1'] = self.flows_a[0](v['1'], z['0'])
 
             for j in range(1, self.n_flows):
-                v[str(j + 1)] = self.v_layers[0][j](v[str(j)])
+                v[str(j + 1)] = self.v_layers[0][j].cuda()(v[str(j)])
                 if not auxiliary:
                     z[str(j + 1)] = self.flows[0](v[str(j + 1)], z[str(j)])
                 else:
@@ -185,8 +177,7 @@ class HouseholderFlow(nn.Module):
 
 
 class ccLinIAF(nn.Module):
-    def __init__(self, in_features, n_flows=1, h_last_dim=None, flow_flavour="ccLinIAF", auxiliary=False,
-                 flow_type=linIAF, device='cuda'):
+    def __init__(self, in_features, n_flows=1, h_last_dim=None, flow_flavour="ccLinIAF", auxiliary=False, flow_type=linIAF):
         super().__init__()
         self.n_combination = n_flows
         self.n_flows = n_flows
@@ -197,7 +188,7 @@ class ccLinIAF(nn.Module):
         encoder_L = []
 
         for i, features in enumerate(list(reversed(in_features))):
-            flows += [flow_type(features).to(device)]
+            flows += [flow_type(features).cuda()]
             combination_l += [CombinationL(features, self.n_combination)]
             encoder_y += [nn.Linear(h_last_dim, self.n_combination)]
             encoder_L += [nn.Linear(h_last_dim, (features ** 2) * self.n_combination)]
@@ -212,10 +203,7 @@ class ccLinIAF(nn.Module):
             self.encoder_y_a = nn.ModuleList(encoder_y)
             self.encoder_L_a = nn.ModuleList(encoder_L)
 
-        self.flows.apply(random_init)
-        self.combination_l.apply(random_init)
-        self.encoder_y.apply(random_init)
-        self.encoder_L.apply(random_init)
+        self.cuda()
 
     def forward(self, z, h_last, auxiliary=False, k=0):
         z = {'0': z, '1': None}
@@ -400,7 +388,7 @@ class IAF(nn.Module):
      Note that the size of h needs to be the same as h_size, which is the width of the MADE layers.
      """
 
-    def __init__(self, z_size, n_flows=2, num_hidden=0, h_size=50, forget_bias=1., conv3d=False, device='cuda'):
+    def __init__(self, z_size, n_flows=2, num_hidden=0, h_size=50, forget_bias=1., conv3d=False):
         super(IAF, self).__init__()
         self.z_size = z_size
         self.n_flows = n_flows
@@ -437,10 +425,10 @@ class IAF(nn.Module):
             self.param_list += list(linear_std.parameters())
 
             if torch.cuda.is_available():
-                z_feats = z_feats
-                zh_feats = zh_feats
-                linear_mean = linear_mean
-                linear_std = linear_std
+                z_feats = z_feats.cuda()
+                zh_feats = zh_feats.cuda()
+                linear_mean = linear_mean.cuda()
+                linear_std = linear_std.cuda()
             self.flows.append((z_feats, zh_feats, linear_mean, linear_std))
 
         self.param_list = torch.nn.ParameterList(self.param_list)
@@ -464,8 +452,7 @@ class IAF(nn.Module):
 
 
 class SylvesterFlows(nn.Module):
-    def __init__(self, in_features, flow_flavour, n_flows=1, h_last_dim=None, flow_type=Sylvester,
-                 auxiliary=None, device='cuda'):
+    def __init__(self, in_features, flow_flavour, n_flows=1, h_last_dim=None, flow_type=Sylvester, auxiliary=None):
         super(SylvesterFlows, self).__init__()
         self.flows = []
         self.h_last_dim = h_last_dim
@@ -478,7 +465,7 @@ class SylvesterFlows(nn.Module):
         # Normalizing flow layers
         for k in range(self.n_flows):
             for i in range(len(in_features)):
-                flow_k = flow_type(self.n_flows).to(device)
+                flow_k = flow_type(self.n_flows)
                 self.add_module('flow_' + str(k) + "_" + str(i) + "_" + str(auxiliary), flow_k)
 
     def forward(self, z, r1, r2, q_ortho, b, k=0, auxiliary=False):

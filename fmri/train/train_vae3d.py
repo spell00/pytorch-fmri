@@ -6,11 +6,12 @@ import json
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from fmri.utils.CycleAnnealScheduler import CycleScheduler
-from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDataset
+from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDataset, _resize_data
 from fmri.utils.transform_3d import Normalize, Flip90, Flip180, Flip270, XFlip, YFlip, ZFlip
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
 from fmri.models.unsupervised.SylvesterVAE3DCNN import SylvesterVAE
 from fmri.utils.plot_performance import plot_performance
+from torch.utils.data.dataset import random_split
 import torchvision
 from torchvision import transforms
 # from ax.plot.contour import plot_contour
@@ -24,11 +25,9 @@ import os
 
 output_directory = "checkpoints"
 from torch.utils.data import Dataset
-import nilearn as nl
 import h5py
 import nibabel as nib
 from fmri.utils.utils import validation_split
-
 
 
 def load_subject(filename, mask_img):
@@ -40,6 +39,77 @@ def load_subject(filename, mask_img):
     subject_img = nl.image.new_img_like(mask_img, subject_data, affine=mask_img.affine, copy_header=True)
 
     return subject_img
+
+
+import nilearn as nl
+
+
+class MRIDataset2(Dataset):
+    def __init__(self, imgs, fmri_mask, basepath, targets=None, transform=None):
+        self.path = basepath
+        self.samples = imgs
+        self.targets = targets
+        self.transform = transform
+        self.mask_img = nl.image.load_img(fmri_mask)
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        x = self.samples[idx]
+        x = torch.Tensor(load_subject(self.path + x, self.mask_img).dataobj)
+        if self.targets != None:
+            y = self.targets[idx]
+        else:
+            y = None
+        if self.transform:
+            x = self.transform(x)
+        return x
+
+
+def get_means_axis():
+    import os
+    import nibabel as nib
+    import itertools
+    path = '/run/media/simon/DATA&STUFF/data/biology/images/t1/train/'
+    size = 32
+    sum_imgs = torch.zeros([size, size, size])
+    max1 = 0
+    for x in os.listdir(path):
+        x = nib.load(path + x).dataobj
+        x = np.array(x)
+        x = torch.Tensor(_resize_data(x, (size, size, size)))
+        if torch.max(x) > max1:
+            max1 = torch.max(x)
+        sum_imgs += torch.Tensor(x)
+
+    avg_voxels = sum_imgs / len(os.listdir(path))
+    imgs_averages = torch.mean(avg_voxels)
+    return avg_voxels, imgs_averages
+
+
+def normalize_images(avg_voxels, imgs_averages):
+    path = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
+    size = 32
+    sum_imgs = torch.zeros([size, size, size])
+    for i, fname in enumerate(os.listdir(path + 'train/')):
+        print(i)
+        x = nib.load(path + 'train/' + fname).dataobj
+        x = np.array(x)
+        x = _resize_data(x, (size, size, size))
+        x = x / 1213.9487
+        sum_imgs += torch.Tensor(x)
+        img = nib.Nifti1Image(x, np.eye(4))
+        img.to_filename(path + 'train_66x66/' + fname + '.nii')
+    avg_voxels = sum_imgs / len(os.listdir(path))
+
+    for i, fname in enumerate(os.listdir(path + 'valid/')):
+        x = nib.load(path + 'valid/' + fname).dataobj
+        x = np.array(x)
+        x = _resize_data(x, (size, size, size))
+        x = x / 1213.9487
+        img = nib.Nifti1Image(x, np.eye(4))
+        img.to_filename(path + 'valid_66x66/' + fname + '.nii')
 
 
 class Train:
@@ -61,7 +131,7 @@ class Train:
                  epochs=1000,
                  fp16_run=False,
                  checkpoint_path=None,
-                 epochs_per_checkpoint=-1,
+                 epochs_per_checkpoint=1,
                  epochs_per_print=10,
                  gated=True,
                  has_dense=True,
@@ -71,12 +141,10 @@ class Train:
                  maxpool=3,
                  verbose=2,
                  size=32,
-                 mean=0.09477084164230691,
-                 std=0.11778934986433932,
+                 mean=0.5,
+                 std=0.5,
                  plot_perform=True,
-                 val_share=0.1,
-                 activation=torch.nn.ReLU,
-                 init_func=nn.init.xavier_uniform_
+                 val_share=0.1
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -110,8 +178,6 @@ class Train:
         self.mean = mean
         self.val_share = val_share
         self.plot_perform = plot_perform
-        self.activation = activation
-        self.init_func = init_func
 
     def train(self, params):
         num_elements = params['num_elements']
@@ -128,11 +194,6 @@ class Train:
         warmup = params['warmup']
         l1 = params['l1'].__format__('e')
         l2 = params['l2'].__format__('e')
-
-        if torch.cuda.is_available():
-            device = 'cuda'
-        else:
-            device = 'cpu'
 
         weight_decay = float(str(weight_decay)[:1] + str(weight_decay)[-4:])
         learning_rate = float(str(learning_rate)[:1] + str(learning_rate)[-4:])
@@ -191,10 +252,8 @@ class Train:
                                      n_flows=n_flows,
                                      n_res=n_res,
                                      gated=self.gated,
-                                     resblocks=self.resblocks,
-                                     activation=self.activation,
-                                     device=device
-            )
+                                     resblocks=self.resblocks
+                                     ).cuda()
         else:
             model = SylvesterVAE(z_dim=z_dim,
                                  maxpool=self.maxpool,
@@ -216,12 +275,12 @@ class Train:
                                  resblocks=self.resblocks,
                                  h_last=z_dim,
                                  n_flows=n_flows,
-                                 num_elements=num_elements,
+                                 num_elements=3,
                                  auxiliary=False,
                                  a_dim=0,
-                                 device=device
+
                                  )
-        # model.random_init(func=self.init_func)
+        model.random_init()
         criterion = nn.MSELoss(reduction="none")
         if optimizer_type == 'adamw':
             optimizer = torch.optim.AdamW(params=model.parameters(),
@@ -277,8 +336,7 @@ class Train:
                                         resblocks=resblocks,
                                         h_last=self.out_channels[-1],
                                         )
-            model = model.to(device)
-        # model.flow = model.flow.to(device)
+        model = model.cuda()
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
 
@@ -289,21 +347,23 @@ class Train:
             Flip90(),
             Flip180(),
             Flip270(),
-            torchvision.transforms.Normalize(mean=self.mean, std=self.std),
+            torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
             Normalize()
         ])
-        all_set = MRIDataset(self.path, transform=train_transform, device=device)
+        all_set = MRIDataset(self.path, transform=train_transform)
         train_set, valid_set = validation_split(all_set, val_share=self.val_share)
 
         train_loader = DataLoader(train_set,
                                   num_workers=0,
                                   shuffle=True,
                                   batch_size=self.batch_size,
+                                  pin_memory=False,
                                   drop_last=True)
         valid_loader = DataLoader(valid_set,
                                   num_workers=0,
                                   shuffle=True,
                                   batch_size=2,
+                                  pin_memory=False,
                                   drop_last=True)
 
         # Get shared output_directory ready
@@ -338,6 +398,10 @@ class Train:
             "train": [],
             "valid": [],
         }
+        running_abs_error = {
+            "train": [],
+            "valid": [],
+        }
         shapes = {
             "train": len(train_set),
             "valid": len(valid_set),
@@ -350,27 +414,33 @@ class Train:
                     print('EARLY STOPPING.')
                 break
             best_epoch = False
+            model.train()
             train_losses = []
             train_abs_error = []
             train_kld = []
             train_recons = []
-            model.train()
 
             # pbar = tqdm(total=len(train_loader))
-            for i, images in enumerate(train_loader):
+            for i, batch in enumerate(train_loader):
                 #    pbar.update(1)
                 model.zero_grad()
-                # images = Variable(images, requires_grad=True).to(device)
-                # images = images.unsqueeze(1)
+                images = batch
+                images = torch.autograd.Variable(images).cuda()
+                images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
+                reconstruct = reconstruct[:, :,
+                              :images.shape[2],
+                              :images.shape[3],
+                              :images.shape[4]].squeeze(1)
+                images = images.squeeze(1)
                 loss_recon = criterion(
                     reconstruct,
                     images
                 ).sum() / self.batch_size
                 kl_div = torch.mean(kl)
                 loss = loss_recon + kl_div
-                l2_reg = torch.Tensor([0])
-                l1_reg = torch.Tensor([0])
+                l2_reg = torch.tensor(0.)
+                l1_reg = torch.tensor(0.)
                 for name, param in model.named_parameters():
                     if 'weight' in name:
                         l1_reg = l1 + torch.norm(param, 1)
@@ -379,26 +449,44 @@ class Train:
                         l2_reg = l2 + torch.norm(param, 1)
                 loss += l1 * l1_reg
                 loss += l2 * l2_reg
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), 1e-8)
                 loss.backward()
+                # not sure if before or after
+                # torch.nn.utils.clip_grad_norm_(model.parameters(), 100)
                 # lr_schedule.step()
 
-                train_losses += [loss.item()]
+                try:
+                    train_losses += [loss.item()]
+                except:
+                    return best_loss
                 train_kld += [kl_div.item()]
                 train_recons += [loss_recon.item()]
+                train_abs_error += [
+                    float(torch.mean(torch.abs_(
+                        reconstruct - images.cuda()
+                    )).item())
+                ]
 
+                # if self.fp16_run:
+                #    with amp.scale_loss(loss, optimizer) as scaled_loss:
+                #        scaled_loss.backward()
+                #    del scaled_loss
+                # else:
+                optimizer.step()
                 logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
-                del kl, loss_recon, kl_div, loss, images, reconstruct, l1_reg, l2_reg
+                del kl, loss_recon, kl_div, loss
 
-            # img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
-            # recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
+            img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
+            recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
             if 'views' not in os.listdir():
                 os.mkdir('views')
-            # img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
-            # recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
+            img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
+            recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
+
             losses["train"] += [np.mean(train_losses)]
             kl_divs["train"] += [np.mean(train_kld)]
             losses_recon["train"] += [np.mean(train_recons)]
-            del train_losses, train_kld, train_recons, train_abs_error  # , img, recon
+            running_abs_error["train"] += [np.mean(train_abs_error)]
 
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 1:
@@ -422,14 +510,20 @@ class Train:
             valid_recons = []
             valid_abs_error = []
             # pbar = tqdm(total=len(valid_loader))
-            for i, images in enumerate(valid_loader):
+            for i, batch in enumerate(valid_loader):
                 #    pbar.update(1)
-                # images = Variable(images, requires_grad=True).to(device)
-                # images = images.unsqueeze(1)
+                images = batch
+                images = images.cuda()
+                images = images.unsqueeze(1)
                 reconstruct, kl = model(images)
+                reconstruct = reconstruct[:, :,
+                              :images.shape[2],
+                              :images.shape[3],
+                              :images.shape[4]].squeeze(1)
+                images = images.squeeze(1)
                 loss_recon = criterion(
                     reconstruct,
-                    images
+                    images.cuda()
                 ).sum()
                 kl_div = torch.mean(kl)
                 if epoch < warmup:
@@ -441,12 +535,12 @@ class Train:
                     return best_loss
                 valid_kld += [kl_div.item()]
                 valid_recons += [loss_recon.item()]
+                valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.cuda())).item())]
                 logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
-                del kl, loss_recon, kl_div, loss, images, reconstruct
-
             losses["valid"] += [np.mean(valid_losses)]
             kl_divs["valid"] += [np.mean(valid_kld)]
             losses_recon["valid"] += [np.mean(valid_recons)]
+            running_abs_error["valid"] += [np.mean(valid_abs_error)]
             if epoch - epoch_offset > 5:
                 lr_schedule.step(losses["valid"][-1])
             # should be valid, but train is ok to test if it can be done without caring about
@@ -461,14 +555,14 @@ class Train:
             else:
                 early_stop_counter += 1
 
-            if epoch % self.epochs_per_checkpoint == 0 and self.save:
-                # img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
-                # recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
+            if epoch % self.epochs_per_checkpoint == 0:
+                img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
+                recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
                 if 'views' not in os.listdir():
                     os.mkdir('views')
-                # img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
-                # recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
-                if best_epoch:
+                img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
+                recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
+                if best_epoch and self.save:
                     if self.verbose > 1:
                         print('Saving model...')
                     save_checkpoint(model=model,
@@ -502,8 +596,6 @@ class Train:
                                     resblocks=resblocks,
                                     h_last=z_dim
                                     )
-                # del img, recon
-            del valid_losses, valid_kld, valid_recons, valid_abs_error
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 0:
                     print("Epoch: {}:\t"
@@ -522,9 +614,9 @@ class Train:
                     print("Current Momentum:", optimizer.param_groups[0]['momentum'])
             if self.plot_perform:
                 plot_performance(loss_total=losses, losses_recon=losses_recon, kl_divs=kl_divs, shapes=shapes,
-                                 results_path="../figures",
-                                 filename="training_loss_trace_"
-                                          + self.modelname + '.jpg')
+                             results_path="../figures",
+                             filename="training_loss_trace_"
+                                      + self.modelname + '.jpg')
         if self.verbose > 0:
             print('BEST LOSS :', best_loss)
         return best_loss
@@ -536,31 +628,31 @@ if __name__ == "__main__":
 
     random.seed(10)
 
-    size = 32
+    size = 33
     z_dim = 50
-    in_channels = [1, 32, 64, 128, 256]
-    out_channels = [32, 64, 128, 256, 256]
-    kernel_sizes = [3, 3, 3, 3, 3]
-    kernel_sizes_deconv = [3, 3, 3, 3, 3]
-    strides = [1, 1, 1, 1, 1]
-    strides_deconv = [1, 1, 1, 1, 1]
-    dilatations = [1, 1, 1, 1, 1]
-    dilatations_Deconv = [1, 1, 1, 1, 1, 1]
-    paddings = [1, 1, 1, 1, 1]
-    paddings_deconv = [1, 1, 1, 1, 1]
-    dilatations_deconv = [1, 1, 1, 1, 1]
+    in_channels = [1, 64, 128, 128, 128, 256, 256]
+    out_channels = [64, 128, 128, 128, 256, 256, 256]
+    kernel_sizes = [3, 3, 3, 3, 3, 3, 3]
+    kernel_sizes_deconv = [3, 3, 3, 3, 3, 3, 3]
+    strides = [1, 1, 1, 1, 1, 1, 1]
+    strides_deconv = [1, 1, 1, 1, 1, 1, 1]
+    dilatations = [1, 1, 1, 1, 1, 1, 1]
+    dilatations_Deconv = [1, 1, 1, 1, 1, 1, 1]
+    paddings = [2, 2, 2, 2, 2, 2, 1]
+    paddings_deconv = [1, 1, 1, 1, 1, 1, 1]
+    dilatations_deconv = [1, 1, 1, 1, 1, 1, 1]
     n_flows = 10
-    bs = 2
+    bs = 8
     maxpool = 2
-    flow_type = 'hf'
+    flow_type = 'o-sylvester'
     epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True
     gated = False
     resblocks = True
     checkpoint_path = "checkpoints"
-    basedir = '/Users/simonpelletier/Downloads/images3d/t1/'
-    path = basedir + str(size) + 'x' + str(size) + '/'
+    basedir = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
+    path = basedir + '33x33/'
 
     n_epochs = 10000
     save = False
@@ -578,7 +670,7 @@ if __name__ == "__main__":
                      batch_size=bs,
                      epochs=n_epochs,
                      checkpoint_path=checkpoint_path,
-                     epochs_per_checkpoint=1,
+                     epochs_per_checkpoint=epochs_per_checkpoint,
                      gated=gated,
                      resblocks=resblocks,
                      fp16_run=False,
@@ -586,7 +678,6 @@ if __name__ == "__main__":
                      flow_type=flow_type,
                      save=save,
                      maxpool=maxpool,
-                     init_func=torch.nn.init.kaiming_uniform_
                      )
     best_parameters, values, experiment, model = optimize(
         parameters=[
@@ -599,7 +690,7 @@ if __name__ == "__main__":
             {"name": "n_flows", "type": "range", "bounds": [2, 20]},
             {"name": "scheduler", "type": "choice", "values":
                 ['ReduceLROnPlateau', 'ReduceLROnPlateau']},
-            {"name": "optimizer", "type": "choice", "values": ['rmsprop', 'rmsprop']},
+            {"name": "optimizer", "type": "choice", "values": ['adamw', 'adamw']},
             {"name": "l1", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "l2", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
