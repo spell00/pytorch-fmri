@@ -1,3 +1,4 @@
+from fmri.models.supervised.cnn3d import ConvResnet3D
 import argparse
 import torch
 import torch.nn as nn
@@ -5,24 +6,26 @@ import numpy as np
 import json
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
+from fmri.utils.activations import Swish, Mish
 from fmri.utils.CycleAnnealScheduler import CycleScheduler
-from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDataset
+from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDatasetClassifier
 from fmri.utils.transform_3d import Normalize, Flip90, Flip180, Flip270, XFlip, YFlip, ZFlip
-from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
-from fmri.models.unsupervised.SylvesterVAE3DCNN import SylvesterVAE
+from fmri.models.supervised.resnetcnn3d import ConvResnet3D
 from fmri.utils.plot_performance import plot_performance
 import torchvision
 from torchvision import transforms
 from ax.service.managed_loop import optimize
 import random
-from fmri.utils.activations import Swish
 
 import os
 
-output_directory = "checkpoints"
 import nibabel as nib
 from fmri.utils.utils import validation_split
 
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = "cpu"
 
 
 class Train:
@@ -30,18 +33,14 @@ class Train:
                  in_channels,
                  out_channels,
                  kernel_sizes,
-                 kernel_sizes_deconv,
                  strides,
-                 strides_deconv,
                  dilatations,
-                 dilatations_deconv,
                  save,
                  padding,
-                 padding_deconv,
                  path,
+                 n_classes,
                  init_func=torch.nn.init.kaiming_uniform_,
                  activation=torch.nn.GELU,
-                 num_elements=0,
                  batch_size=8,
                  epochs=1000,
                  fp16_run=False,
@@ -52,7 +51,6 @@ class Train:
                  has_dense=True,
                  batchnorm=False,
                  resblocks=False,
-                 flow_type='vanilla',
                  maxpool=3,
                  verbose=2,
                  size=32,
@@ -62,6 +60,7 @@ class Train:
                  val_share=0.1
                  ):
         super().__init__()
+        self.n_classes = n_classes
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_sizes = kernel_sizes
@@ -71,7 +70,6 @@ class Train:
         self.dilatations = dilatations
         self.dilatations_deconv = dilatations_deconv
         self.padding = padding
-        self.padding_deconv = padding_deconv
         self.batch_size = batch_size
         self.epochs = epochs
         self.fp16_run = fp16_run
@@ -82,7 +80,6 @@ class Train:
         self.has_dense = has_dense
         self.batchnorm = batchnorm
         self.resblocks = resblocks
-        self.flow_type = flow_type
         self.maxpool = maxpool
         self.save = save
         self.verbose = verbose
@@ -108,7 +105,6 @@ class Train:
         scheduler = params['scheduler']
         optimizer_type = params['optimizer']
         momentum = params['momentum']
-        z_dim = params['z_dim']
         learning_rate = params['learning_rate'].__format__('e')
         n_flows = params['n_flows']
         weight_decay = params['weight_decay'].__format__('e')
@@ -122,7 +118,7 @@ class Train:
         l2 = float(str(l2)[:1] + str(l2)[-4:])
         if self.verbose > 1:
             print("Parameters: \n\t",
-                  'zdim: ' + str(z_dim) + "\n\t",
+                  'zdim: ' + str(self.n_classes) + "\n\t",
                   'mom_range: ' + str(mom_range) + "\n\t",
                   'num_elements: ' + str(num_elements) + "\n\t",
                   'niter: ' + str(niter) + "\n\t",
@@ -137,15 +133,14 @@ class Train:
                   'optimizer_type: ' + optimizer_type + "\n\t",
                   )
 
-        self.modelname = "vae_3dcnn_" \
-                         + '_flows' + self.flow_type + str(n_flows) \
+        self.modelname = "classif_3dcnn_" \
                          + '_bn' + str(self.batchnorm) \
                          + '_niter' + str(niter) \
                          + '_nres' + str(n_res) \
                          + '_momrange' + str(mom_range) \
                          + '_momentum' + str(momentum) \
                          + '_' + str(optimizer_type) \
-                         + "_zdim" + str(z_dim) \
+                         + "_nclasses" + str(self.n_classes) \
                          + '_gated' + str(self.gated) \
                          + '_resblocks' + str(self.resblocks) \
                          + '_initlr' + learning_rate.__format__('e') \
@@ -154,55 +149,23 @@ class Train:
                          + '_l1' + l1.__format__('e') \
                          + '_l2' + l2.__format__('e') \
                          + '_size' + str(self.size)
-        if self.flow_type != 'o-sylvester':
-            model = Autoencoder3DCNN(z_dim,
-                                     self.maxpool,
-                                     self.in_channels,
-                                     self.out_channels,
-                                     self.kernel_sizes,
-                                     self.kernel_sizes_deconv,
-                                     self.strides,
-                                     self.strides_deconv,
-                                     self.dilatations,
-                                     self.dilatations_deconv,
-                                     self.padding,
-                                     self.padding_deconv,
-                                     has_dense=self.has_dense,
-                                     batchnorm=self.batchnorm,
-                                     flow_type=self.flow_type,
-                                     n_flows=n_flows,
-                                     n_res=n_res,
-                                     gated=self.gated,
-                                     resblocks=self.resblocks
-                                     ).to(device)
-        else:
-            model = SylvesterVAE(z_dim=z_dim,
-                                 maxpool=self.maxpool,
-                                 in_channels=self.in_channels,
-                                 out_channels=self.out_channels,
-                                 kernel_sizes=self.kernel_sizes,
-                                 kernel_sizes_deconv=self.kernel_sizes_deconv,
-                                 strides=self.strides,
-                                 strides_deconv=self.strides_deconv,
-                                 dilatations=self.dilatations,
-                                 dilatations_deconv=self.dilatations_deconv,
-                                 padding=self.padding,
-                                 padding_deconv=self.padding_deconv,
-                                 batchnorm=self.batchnorm,
-                                 flow_type=self.flow_type,
-                                 n_res=n_res,
-                                 gated=self.gated,
-                                 has_dense=self.has_dense,
-                                 resblocks=self.resblocks,
-                                 h_last=z_dim,
-                                 n_flows=n_flows,
-                                 num_elements=num_elements,
-                                 auxiliary=False,
-                                 a_dim=0,
-
-                                 )
+        model = ConvResnet3D(maxpool,
+                             self.in_channels,
+                             self.out_channels,
+                             self.kernel_sizes,
+                             self.strides,
+                             self.dilatations,
+                             self.padding,
+                             self.batchnorm,
+                             self.n_classes,
+                             activation=torch.nn.ReLU,
+                             n_res=n_res,
+                             gated=self.gated,
+                             has_dense=self.has_dense,
+                             resblocks=self.resblocks,
+                             ).to(device)
         model.random_init()
-        criterion = nn.MSELoss(reduction="none")
+        criterion = nn.CrossEntropyLoss()
         if optimizer_type == 'adamw':
             optimizer = torch.optim.AdamW(params=model.parameters(),
                                           lr=learning_rate,
@@ -241,7 +204,7 @@ class Train:
                                         flow_type=self.flow_type,
                                         padding_deconv=self.padding_deconv,
                                         optimizer=optimizer,
-                                        z_dim=z_dim,
+                                        z_dim=self.n_classes,
                                         gated=self.gated,
                                         in_channels=self.in_channels,
                                         out_channels=self.out_channels,
@@ -256,7 +219,7 @@ class Train:
                                         n_res=n_res,
                                         resblocks=resblocks,
                                         h_last=self.out_channels[-1],
-                                        n_elements=num_elements
+                                        n_elements=self.num_elements
                                         )
         model = model.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
@@ -272,7 +235,7 @@ class Train:
             torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
             Normalize()
         ])
-        all_set = MRIDataset(self.path, transform=train_transform)
+        all_set = MRIDatasetClassifier(self.path, transform=train_transform)
         train_set, valid_set = validation_split(all_set, val_share=self.val_share)
 
         train_loader = DataLoader(train_set,
@@ -312,15 +275,7 @@ class Train:
             "train": [],
             "valid": [],
         }
-        kl_divs = {
-            "train": [],
-            "valid": [],
-        }
-        losses_recon = {
-            "train": [],
-            "valid": [],
-        }
-        running_abs_error = {
+        accuracies = {
             "train": [],
             "valid": [],
         }
@@ -338,29 +293,20 @@ class Train:
             best_epoch = False
             model.train()
             train_losses = []
-            train_abs_error = []
-            train_kld = []
-            train_recons = []
+            train_accuracy = []
 
             # pbar = tqdm(total=len(train_loader))
             for i, batch in enumerate(train_loader):
                 #    pbar.update(1)
                 model.zero_grad()
-                images = batch
+                images, targets = batch
                 images = torch.autograd.Variable(images).to(device)
+                targets = torch.autograd.Variable(targets).to(device)
                 # images = images.unsqueeze(1)
-                reconstruct, kl = model(images)
-                reconstruct = reconstruct[:, :,
-                              :images.shape[2],
-                              :images.shape[3],
-                              :images.shape[4]].squeeze(1)
+                preds = model(images)
                 images = images.squeeze(1)
-                loss_recon = criterion(
-                    reconstruct,
-                    images
-                ).sum() / self.batch_size
-                kl_div = torch.mean(kl)
-                loss = loss_recon + kl_div
+
+                loss = criterion(preds, targets)
                 l2_reg = torch.tensor(0.)
                 l1_reg = torch.tensor(0.)
                 for name, param in model.named_parameters():
@@ -371,98 +317,48 @@ class Train:
                         l2_reg = l2 + torch.norm(param, 1)
                 loss += l1 * l1_reg
                 loss += l2 * l2_reg
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), 1e-8)
+
                 loss.backward()
-                # not sure if before or after
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), 100)
-                # lr_schedule.step()
+                accuracy = sum([1 if torch.argmax(pred) == target else 0 for (pred, target) in zip(preds, targets)]) / len(targets)
+                train_accuracy += [accuracy]
 
-                try:
-                    train_losses += [loss.item()]
-                except:
-                    return best_loss
-                train_kld += [kl_div.item()]
-                train_recons += [loss_recon.item()]
-                train_abs_error += [
-                    float(torch.mean(torch.abs_(
-                        reconstruct - images.to(device)
-                    )).item())
-                ]
+                train_losses += [loss.item()]
 
-                # if self.fp16_run:
-                #    with amp.scale_loss(loss, optimizer) as scaled_loss:
-                #        scaled_loss.backward()
-                #    del scaled_loss
-                # else:
                 optimizer.step()
                 logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
-                del kl, loss_recon, kl_div, loss
-
-            img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
-            recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
-            if 'views' not in os.listdir():
-                os.mkdir('views')
-            img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
-            recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
+                del loss
 
             losses["train"] += [np.mean(train_losses)]
-            kl_divs["train"] += [np.mean(train_kld)]
-            losses_recon["train"] += [np.mean(train_recons)]
-            running_abs_error["train"] += [np.mean(train_abs_error)]
+            accuracies["train"] += [np.mean(train_accuracy)]
 
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 1:
                     print("Epoch: {}:\t"
                           "Train Loss: {:.5f} , "
-                          "kld: {:.3f} , "
-                          "recon: {:.3f}"
+                          "Accuracy: {:.3f} , "
                           .format(epoch,
                                   losses["train"][-1],
-                                  kl_divs["train"][-1],
-                                  losses_recon["train"][-1])
-                          )
+                                  accuracies["train"][-1]
+                                  ))
 
-            if np.isnan(losses["train"][-1]):
-                if self.verbose > 0:
-                    print('PREMATURE RETURN...')
-                return best_loss
             model.eval()
             valid_losses = []
-            valid_kld = []
-            valid_recons = []
-            valid_abs_error = []
+            valid_accuracy = []
             # pbar = tqdm(total=len(valid_loader))
             for i, batch in enumerate(valid_loader):
                 #    pbar.update(1)
-                images = batch
-                images = images.to(device)
-                # images = images.unsqueeze(1)
-                reconstruct, kl = model(images)
-                reconstruct = reconstruct[:, :,
-                              :images.shape[2],
-                              :images.shape[3],
-                              :images.shape[4]].squeeze(1)
-                images = images.squeeze(1)
-                loss_recon = criterion(
-                    reconstruct,
-                    images.to(device)
-                ).sum()
-                kl_div = torch.mean(kl)
-                if epoch < warmup:
-                    kl_div = kl_div * (epoch / warmup)
-                loss = loss_recon + kl_div
-                try:
-                    valid_losses += [loss.item()]
-                except:
-                    return best_loss
-                valid_kld += [kl_div.item()]
-                valid_recons += [loss_recon.item()]
-                valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.to(device))).item())]
+                images, targets = batch
+                images = torch.autograd.Variable(images).to(device)
+                targets = torch.autograd.Variable(targets).to(device)
+                preds = model(images)
+
+                loss = criterion(preds, targets)
+                valid_losses += [loss.item()]
+                accuracy = sum([1 if torch.argmax(pred) == target else 0 for (pred, target) in zip(preds, targets)]) / len(targets)
+                valid_accuracy += [accuracy]
                 logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
             losses["valid"] += [np.mean(valid_losses)]
-            kl_divs["valid"] += [np.mean(valid_kld)]
-            losses_recon["valid"] += [np.mean(valid_recons)]
-            running_abs_error["valid"] += [np.mean(valid_abs_error)]
+            accuracies["valid"] += [np.mean(valid_accuracy)]
             if epoch - epoch_offset > 5:
                 lr_schedule.step(losses["valid"][-1])
             # should be valid, but train is ok to test if it can be done without caring about
@@ -478,12 +374,6 @@ class Train:
                 early_stop_counter += 1
 
             if epoch % self.epochs_per_checkpoint == 0:
-                img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
-                recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
-                if 'views' not in os.listdir():
-                    os.mkdir('views')
-                img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
-                recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
                 if best_epoch and self.save:
                     if self.verbose > 1:
                         print('Saving model...')
@@ -491,54 +381,53 @@ class Train:
                                     optimizer=optimizer,
                                     maxpool=maxpool,
                                     padding=self.padding,
-                                    padding_deconv=self.padding_deconv,
+                                    padding_deconv=None,
                                     learning_rate=learning_rate,
                                     epoch=epoch,
-                                    checkpoint_path=output_directory,
-                                    z_dim=z_dim,
+                                    checkpoint_path=None,
+                                    z_dim=self.n_classes,
                                     gated=self.gated,
                                     batchnorm=self.batchnorm,
                                     losses=losses,
-                                    kl_divs=kl_divs,
-                                    losses_recon=losses_recon,
+                                    kl_divs=None,
+                                    losses_recon=None,
                                     in_channels=self.in_channels,
                                     out_channels=self.out_channels,
                                     kernel_sizes=self.kernel_sizes,
-                                    kernel_sizes_deconv=self.kernel_sizes_deconv,
+                                    kernel_sizes_deconv=None,
                                     strides=self.strides,
-                                    strides_deconv=self.strides_deconv,
+                                    strides_deconv=None,
                                     dilatations=self.dilatations,
-                                    dilatations_deconv=self.dilatations_deconv,
+                                    dilatations_deconv=None,
                                     best_loss=best_loss,
                                     save=self.save,
                                     name=self.modelname,
-                                    n_flows=n_flows,
-                                    flow_type=self.flow_type,
+                                    n_flows=None,
+                                    flow_type=None,
                                     n_res=n_res,
                                     resblocks=resblocks,
-                                    h_last=z_dim
+                                    h_last=None,
+                                    n_elements=None
                                     )
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 0:
                     print("Epoch: {}:\t"
                           "Valid Loss: {:.5f} , "
-                          "kld: {:.3f} , "
-                          "recon: {:.3f}"
+                          "Accuracy: {:.3f} "
                           .format(epoch,
                                   losses["valid"][-1],
-                                  kl_divs["valid"][-1],
-                                  losses_recon["valid"][-1]
+                                  accuracies["valid"][-1],
                                   )
                           )
                 if self.verbose > 1:
                     print("Current LR:", optimizer.param_groups[0]['lr'])
                 if 'momentum' in optimizer.param_groups[0].keys():
                     print("Current Momentum:", optimizer.param_groups[0]['momentum'])
-            if self.plot_perform:
-                plot_performance(loss_total=losses, losses_recon=losses_recon, kl_divs=kl_divs, shapes=shapes,
-                             results_path="../figures",
-                             filename="training_loss_trace_"
-                                      + self.modelname + '.jpg')
+            #if self.plot_perform:
+            #    plot_performance(loss_total=losses, losses_recon=losses_recon, kl_divs=kl_divs, shapes=shapes,
+            #                     results_path="../figures",
+            #                     filename="training_loss_trace_"
+            #                              + self.modelname + '.jpg')
         if self.verbose > 0:
             print('BEST LOSS :', best_loss)
         return best_loss
@@ -551,7 +440,6 @@ if __name__ == "__main__":
     random.seed(10)
 
     size = 32
-    z_dim = 50
     in_channels = [1, 32, 64, 128, 256]
     out_channels = [32, 64, 128, 256, 256]
     kernel_sizes = [3, 3, 3, 3, 3]
@@ -566,42 +454,34 @@ if __name__ == "__main__":
     n_flows = 10
     bs = 8
     maxpool = 2
-    flow_type = 'o-sylvester'
-    epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True
     gated = False
     resblocks = True
     checkpoint_path = "checkpoints"
-    basedir = '/Users/simonpelletier/Downloads/images3d/t1/'
-    path = basedir + '32x32/'
+    path = '/Users/simonpelletier/Downloads/images3d/'
 
     n_epochs = 10000
-    save = True
+    save = False
     training = Train(in_channels=in_channels,
                      out_channels=out_channels,
                      kernel_sizes=kernel_sizes,
-                     kernel_sizes_deconv=kernel_sizes_deconv,
                      strides=strides,
-                     strides_deconv=strides_deconv,
                      dilatations=dilatations,
-                     dilatations_deconv=dilatations_deconv,
                      path=path,
                      padding=paddings,
-                     padding_deconv=paddings_deconv,
                      batch_size=bs,
                      epochs=n_epochs,
                      checkpoint_path=checkpoint_path,
-                     epochs_per_checkpoint=epochs_per_checkpoint,
+                     epochs_per_checkpoint=1,
                      gated=gated,
                      resblocks=resblocks,
-                     fp16_run=False,
                      batchnorm=batchnorm,
-                     flow_type=flow_type,
                      save=save,
                      maxpool=maxpool,
                      activation=Swish,
-                     init_func=torch.nn.init.kaiming_uniform_
+                     init_func=torch.nn.init.kaiming_uniform_,
+                     n_classes=2
                      )
     best_parameters, values, experiment, model = optimize(
         parameters=[
@@ -610,7 +490,6 @@ if __name__ == "__main__":
             {"name": "num_elements", "type": "range", "bounds": [1, 5]},
             {"name": "niter", "type": "choice", "values": [10, 10]},
             {"name": "n_res", "type": "range", "bounds": [0, 10]},
-            {"name": "z_dim", "type": "range", "bounds": [50, 256]},
             {"name": "n_flows", "type": "range", "bounds": [2, 20]},
             {"name": "scheduler", "type": "choice", "values":
                 ['ReduceLROnPlateau', 'ReduceLROnPlateau']},

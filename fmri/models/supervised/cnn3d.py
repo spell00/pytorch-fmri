@@ -84,7 +84,7 @@ class Simple3DCNN(torch.nn.Module):
         self.bns = []
         self.lns = []
         self.pooling_layers = []
-        in_channels = [53, 64, 128, 256]
+        in_channels = [1, 64, 128, 256]
         out_channels = [64, 128, 256, 1]
         kernel_sizes = [4, 4, 4, 1]
         strides = [3, 3, 3, 1]

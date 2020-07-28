@@ -89,13 +89,13 @@ class GaussianSample(Stochastic):
 
 
 class ResBlock(nn.Module):
-    def __init__(self, in_channel, channel, device):
+    def __init__(self, in_channel, channel, activation=nn.ReLU, device='cuda'):
         super().__init__()
         self.device = device
         self.conv = nn.Sequential(
-            nn.GELU(),
+            activation(),
             nn.Conv3d(in_channel, channel, 3, padding=1),
-            nn.GELU(),
+            activation(),
             nn.Conv3d(channel, in_channel, 1),
         )
         self.conv.apply(random_init)
@@ -107,13 +107,13 @@ class ResBlock(nn.Module):
 
 
 class ResBlockDeconv(nn.Module):
-    def __init__(self, in_channel, channel, device):
+    def __init__(self, in_channel, channel, activation=nn.ReLU, device='cuda'):
         super().__init__()
         self.device = device
         self.conv = nn.Sequential(
-            nn.GELU(),
+            activation(),
             nn.ConvTranspose3d(in_channel, channel, 1),
-            nn.GELU(),
+            activation(),
             nn.ConvTranspose3d(channel, in_channel, 3, padding=1),
         )
         self.conv.apply(random_init)
@@ -197,7 +197,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                 )]
             if resblocks and i != 0:
                 for _ in range(n_res):
-                    self.resconv += [ResBlock(ins, outs, device)]
+                    self.resconv += [ResBlock(ins, outs, activation,device)]
             self.bns += [nn.BatchNorm3d(num_features=outs)]
 
         for i, (ins, outs, ksize, stride, dilats, pad) in enumerate(zip(reversed(out_channels),
@@ -218,7 +218,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                                                             )]
             if resblocks and i != 0:
                 for _ in range(n_res):
-                    self.resdeconv += [ResBlockDeconv(ins, outs, device)]
+                    self.resdeconv += [ResBlockDeconv(ins, outs, activation, device)]
 
             self.bns_deconv += [nn.BatchNorm3d(num_features=outs)]
 

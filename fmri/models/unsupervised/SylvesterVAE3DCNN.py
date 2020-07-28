@@ -5,23 +5,6 @@ from fmri.models.utils.distributions import log_gaussian, log_standard_gaussian
 from fmri.models.utils.flow import Sylvester, TriangularSylvester, SylvesterFlows
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
 
-'''
-z_dim,
-                 maxpool,
-                 in_channels,
-                 out_channels,
-                 kernel_sizes,
-                 kernel_sizes_deconv,
-                 strides,
-                 strides_deconv,
-                 dilatations,
-                 dilatations_deconv,
-                 padding,
-                 padding_deconv,
-                 batchnorm,
-
-'''
-
 def random_init(m, init_func=torch.nn.init.kaiming_uniform_):
     if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
         init_func(m.weight.data)

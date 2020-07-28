@@ -4,6 +4,7 @@ import itertools
 import numpy as np
 from torch.utils.data import Dataset
 import nibabel as nib
+from fmri.models.supervised.resnetcnn3d import ConvResnet3D
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
 from fmri.models.unsupervised.SylvesterVAE3DCNN import SylvesterVAE
 
@@ -47,11 +48,39 @@ class MRIDataset(Dataset):
         x = nib.load(self.path + x).dataobj
         x = np.array(x)
         # x = _resize_data(x, (self.size, self.size, self.size))
-        x = torch.Tensor(x) # .to(self.device)
+        x = torch.Tensor(x)  # .to(self.device)
         # x.requires_grad = False
         if self.transform:
             x = self.transform(x)
         return x.unsqueeze(0)
+
+class MRIDatasetClassifier(Dataset):
+    def __init__(self, path, transform=None, size=32, device='cuda'):
+        self.path = path
+        self.device = device
+        self.size = size
+        self.names = os.listdir(path)
+        self.samples = []
+        self.targets = []
+        for i, name in enumerate(self.names):
+            samples = os.listdir(path + '/' + name + '/' + str(size) + 'x' + str(size))
+            # self.samples.extend(samples)
+            self.targets.extend([i for _ in range(len(samples))])
+            self.samples.extend([path + '/' + name + '/' + str(size) + 'x' + str(size) + "/" + s for s in samples])
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        # x = self.samples[idx]
+        target = self.targets[idx]
+        x = nib.load(self.samples[idx]).dataobj
+        x = np.array(x)
+        x = torch.Tensor(x)
+        if self.transform:
+            x = self.transform(x)
+        return x.unsqueeze(0), target
 
 
 def load_checkpoint(checkpoint_path,
@@ -78,7 +107,9 @@ def load_checkpoint(checkpoint_path,
                     n_res,
                     resblocks,
                     h_last,
-                    name="vae_1dcnn"):
+                    n_elements,
+                    name="vae_1dcnn",
+                    ):
     # if checkpoint_path
     losses_recon = {
         "train": [],
@@ -127,6 +158,7 @@ def load_checkpoint(checkpoint_path,
                             n_res=n_res,
                             resblocks=resblocks,
                             h_last=z_dim,
+                            n_elements=n_elements
                             )
     checkpoint_dict = torch.load(checkpoint_path + '/' + name, map_location='cpu')
     epoch = checkpoint_dict['epoch']
@@ -169,13 +201,14 @@ def save_checkpoint(model,
                     n_res,
                     resblocks,
                     h_last,
+                    n_elements,
                     flow_type='vanilla',
                     best_loss=-1,
                     has_dense=True,
-                    name="vae_1dcnn"):
+                    name="vae_3dcnn"):
     if not save:
         return
-    if flow_type != 'o-sylvester':
+    if name == 'classifier':
         model_for_saving = Autoencoder3DCNN(maxpool=maxpool,
                                             padding=padding,
                                             batchnorm=batchnorm,
@@ -197,31 +230,71 @@ def save_checkpoint(model,
                                             dilatations=dilatations,
                                             dilatations_deconv=dilatations_deconv,
                                             ).cuda()
-    else:
-        model_for_saving = SylvesterVAE(z_dim=z_dim,
-                                        maxpool=maxpool,
-                                        in_channels=in_channels,
-                                        out_channels=out_channels,
-                                        kernel_sizes=kernel_sizes,
-                                        kernel_sizes_deconv=kernel_sizes_deconv,
-                                        strides=strides,
-                                        strides_deconv=strides_deconv,
-                                        dilatations=dilatations,
-                                        dilatations_deconv=dilatations_deconv,
-                                        padding=padding,
-                                        padding_deconv=padding_deconv,
-                                        batchnorm=batchnorm,
-                                        flow_type=flow_type,
-                                        n_res=n_res,
-                                        gated=gated,
-                                        has_dense=has_dense,
-                                        resblocks=resblocks,
-                                        h_last=h_last,
-                                        n_flows=n_flows,
-                                        num_elements=3,
-                                        auxiliary=False,
-                                        a_dim=0
-                                        ).cuda()
+    model_type = name.split("_")[0]
+    if model_type == 'vae':
+        if flow_type != 'o-sylvester':
+            model_for_saving = Autoencoder3DCNN(maxpool=maxpool,
+                                                padding=padding,
+                                                batchnorm=batchnorm,
+                                                padding_deconv=padding_deconv,
+                                                flow_type=flow_type,
+                                                has_dense=has_dense,
+                                                n_flows=n_flows,
+                                                z_dim=z_dim,
+                                                n_res=n_res,
+                                                resblocks=resblocks,
+                                                h_last=h_last,
+                                                gated=gated,
+                                                in_channels=in_channels,
+                                                out_channels=out_channels,
+                                                kernel_sizes=kernel_sizes,
+                                                kernel_sizes_deconv=kernel_sizes_deconv,
+                                                strides=strides,
+                                                strides_deconv=strides_deconv,
+                                                dilatations=dilatations,
+                                                dilatations_deconv=dilatations_deconv,
+                                                )
+        else:
+            model_for_saving = SylvesterVAE(z_dim=z_dim,
+                                            maxpool=maxpool,
+                                            in_channels=in_channels,
+                                            out_channels=out_channels,
+                                            kernel_sizes=kernel_sizes,
+                                            kernel_sizes_deconv=kernel_sizes_deconv,
+                                            strides=strides,
+                                            strides_deconv=strides_deconv,
+                                            dilatations=dilatations,
+                                            dilatations_deconv=dilatations_deconv,
+                                            padding=padding,
+                                            padding_deconv=padding_deconv,
+                                            batchnorm=batchnorm,
+                                            flow_type=flow_type,
+                                            n_res=n_res,
+                                            gated=gated,
+                                            has_dense=has_dense,
+                                            resblocks=resblocks,
+                                            h_last=h_last,
+                                            n_flows=n_flows,
+                                            num_elements=n_elements,
+                                            auxiliary=False,
+                                            a_dim=0
+                                            )
+    elif model_type == "classif":
+        model_for_saving = ConvResnet3D(maxpool,
+                                        in_channels,
+                                        out_channels,
+                                        kernel_sizes,
+                                        strides,
+                                        dilatations,
+                                        padding,
+                                        batchnorm,
+                                        n_classes=z_dim,
+                                        activation=torch.nn.ReLU,
+                                        n_res=3,
+                                        gated=True,
+                                        has_dense=True,
+                                        resblocks=False
+                                        )
 
     model_for_saving.load_state_dict(model.state_dict())
     torch.save({'model': model_for_saving,
