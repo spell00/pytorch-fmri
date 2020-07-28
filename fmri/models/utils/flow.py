@@ -156,7 +156,8 @@ class HouseholderFlow(nn.Module):
         for i, features in enumerate(reversed(in_features)):
             flows += [flow_type().to(device)]
             v_layers = [nn.Linear(h_last_dim, features).to(device)] + [nn.Linear(features, features).to(device) for _ in range(n_flows)]
-            self.v_layers += [nn.ModuleList(v_layers[-1].apply(random_init))]
+            v_layers = nn.ModuleList(v_layers).apply(random_init)
+            self.v_layers += [v_layers]
         if not auxiliary:
             self.flows = nn.ModuleList(flows)
         else:
