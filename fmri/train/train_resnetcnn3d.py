@@ -64,11 +64,8 @@ class Train:
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_sizes = kernel_sizes
-        self.kernel_sizes_deconv = kernel_sizes_deconv
         self.strides = strides
-        self.strides_deconv = strides_deconv
         self.dilatations = dilatations
-        self.dilatations_deconv = dilatations_deconv
         self.padding = padding
         self.batch_size = batch_size
         self.epochs = epochs
