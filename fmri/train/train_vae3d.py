@@ -307,7 +307,7 @@ class Train:
                                  resblocks=self.resblocks,
                                  h_last=z_dim,
                                  n_flows=n_flows,
-                                 num_elements=3,
+                                 num_elements=num_elements,
                                  auxiliary=False,
                                  a_dim=0,
 
