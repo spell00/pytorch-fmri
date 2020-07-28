@@ -146,7 +146,7 @@ class Train:
                          + '_l1' + l1.__format__('e') \
                          + '_l2' + l2.__format__('e') \
                          + '_size' + str(self.size)
-        model = ConvResnet3D(maxpool,
+        model = ConvResnet3D(self.maxpool,
                              self.in_channels,
                              self.out_channels,
                              self.kernel_sizes,
