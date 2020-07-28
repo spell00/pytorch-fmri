@@ -12,6 +12,13 @@ kernel_sizes = None
 strides = None
 
 
+def random_init(m, func=nn.init.xavier_uniform_):
+    if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
+        func(m.weight.data)
+        if m.bias is not None:
+            m.bias.data.zero_()
+
+
 def swish(x):
     return x * x.sigmoid()
 
@@ -90,6 +97,7 @@ class ResBlock(nn.Module):
             activation(),
             nn.Conv3d(channel, in_channel, 1),
         )
+        self.conv.apply(random_init)
 
     def forward(self, input):
         out = self.conv(input)
@@ -108,6 +116,8 @@ class ResBlockDeconv(nn.Module):
             activation(),
             nn.ConvTranspose3d(channel, in_channel, 3, padding=1),
         )
+        self.conv.apply(random_init)
+
 
     def forward(self, input):
         out = self.conv(input)
@@ -188,6 +198,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                     activation(),
                     nn.Dropout3d(0.5),
                 ]
+            layers_list[-1].apply(random_init)
             if resblocks and i < len(in_channels) - 1:
                 for _ in range(n_res):
                     layers_list += [
@@ -196,6 +207,8 @@ class Autoencoder3DCNN(torch.nn.Module):
                         activation(),
                         nn.Dropout3d(0.5)
                     ]
+            #tmp = nn.Sequential(*layers_list)
+            #tmp.apply(random_init)
 
             resconv += [nn.Sequential(*layers_list)]
 
@@ -238,6 +251,8 @@ class Autoencoder3DCNN(torch.nn.Module):
                         activation(),
                         nn.Dropout3d(0.5)
                     ]
+            #tmp = nn.Sequential(*layers_list)
+            #tmp.apply(random_init)
             resdeconv += [nn.Sequential(*layers_list)]
 
         self.dense1 = nn.Sequential(
@@ -245,11 +260,14 @@ class Autoencoder3DCNN(torch.nn.Module):
             nn.BatchNorm1d(num_features=z_dim),
             nn.Dropout(0.5)
         ).to(device)
+
         self.dense2 = nn.Sequential(
             nn.Linear(in_features=z_dim, out_features=out_channels[-1]),
             nn.BatchNorm1d(num_features=out_channels[-1]),
             nn.Dropout(0.5)
         ).to(device)
+        self.dense1.apply(random_init)
+        self.dense2.apply(random_init)
         self.maxpool = nn.MaxPool3d(maxpool, return_indices=True).to(device)
         self.maxunpool = nn.MaxUnpool3d(maxpool).to(device)
         self.resconv = nn.ModuleList(resconv).to(device)
@@ -268,12 +286,12 @@ class Autoencoder3DCNN(torch.nn.Module):
             self.flow = SylvesterFlows(in_features=[z_dim], flow_flavour='o-sylvester', n_flows=1, h_last_dim=None, device=device)
 
     def random_init(self, func=nn.init.xavier_uniform_):
+
         for m in self.modules():
             if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
                 func(m.weight.data)
                 if m.bias is not None:
                     m.bias.data.zero_()
-
     def _kld(self, z, q_param, h_last=None, p_param=None):
         if len(z.shape) == 1:
             z = z.view(1, -1)

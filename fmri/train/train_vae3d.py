@@ -556,7 +556,7 @@ if __name__ == "__main__":
     epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True
-    gated = True
+    gated = False
     resblocks = True
     checkpoint_path = "checkpoints"
     basedir = '/Users/simonpelletier/Downloads/images3d/t1/'

@@ -5,6 +5,13 @@ from torch.autograd import Variable
 from fmri.models.utils.masked_layer import MaskedConv3d, MaskedLinear
 
 
+def random_init(m, func=nn.init.xavier_uniform_):
+    if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
+        func(m.weight.data)
+        if m.bias is not None:
+            m.bias.data.zero_()
+
+
 class PlanarNormalizingFlow(nn.Module):
     """
     Planar normalizing flow [Rezende & Mohamed 2015].
@@ -122,7 +129,7 @@ class NormalizingFlows(nn.Module):
         self.flow_type = "nf"
         for i, features in enumerate(reversed(in_features)):
             self.flows += [nn.ModuleList([flow_type(features).to(device) for _ in range(n_flows)])]
-
+            self.flows[-1].apply(random_init)
         super(NormalizingFlows, self).__init__()
 
     def forward(self, z, i=0):
@@ -142,14 +149,14 @@ class HouseholderFlow(nn.Module):
                  device='cuda'):
         super(HouseholderFlow, self).__init__()
         self.flow_flavour = flow_flavour
-        self.v_layers = [[] for _ in range(len(in_features))]
+        self.v_layers = nn.ModuleList()
         self.n_flows = n_flows
         self.flow_type = "hf"
         flows = []
         for i, features in enumerate(reversed(in_features)):
             flows += [flow_type().to(device)]
             v_layers = [nn.Linear(h_last_dim, features).to(device)] + [nn.Linear(features, features).to(device) for _ in range(n_flows)]
-            self.v_layers[i] = nn.ModuleList(v_layers)
+            self.v_layers += [nn.ModuleList(v_layers[-1].apply(random_init))]
         if not auxiliary:
             self.flows = nn.ModuleList(flows)
         else:
@@ -204,7 +211,10 @@ class ccLinIAF(nn.Module):
             self.encoder_y_a = nn.ModuleList(encoder_y)
             self.encoder_L_a = nn.ModuleList(encoder_L)
 
-        self
+        self.flows.apply(random_init)
+        self.combination_l.apply(random_init)
+        self.encoder_y.apply(random_init)
+        self.encoder_L.apply(random_init)
 
     def forward(self, z, h_last, auxiliary=False, k=0):
         z = {'0': z, '1': None}
