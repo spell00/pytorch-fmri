@@ -76,14 +76,11 @@ class ConvResnet3D(nn.Module):
         self.maxpool = nn.MaxPool3d(maxpool, return_indices=False)
 
         self.device = device
-        self.conv_layers = []
-        self.deconv_layers = []
-        self.bns = []
-        self.dropout = []
-        self.resconv = []
-        self.resdeconv = []
-        self.bns_deconv = []
-        self.indices = [torch.Tensor() for _ in range(len(in_channels))]
+        self.conv_layers = nn.ModuleList()
+        self.deconv_layers = nn.ModuleList()
+        self.bns = nn.ModuleList()
+        self.dropout = nn.ModuleList()
+        self.resconv = nn.ModuleList()
         self.activation = activation()
 
         self.n_res = n_res
