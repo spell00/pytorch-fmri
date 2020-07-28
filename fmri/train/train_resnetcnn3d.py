@@ -376,7 +376,7 @@ class Train:
                         print('Saving model...')
                     save_checkpoint(model=model,
                                     optimizer=optimizer,
-                                    maxpool=maxpool,
+                                    maxpool=self.maxpool,
                                     padding=self.padding,
                                     padding_deconv=None,
                                     learning_rate=learning_rate,
