@@ -232,7 +232,7 @@ class Train:
             torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
             Normalize()
         ])
-        all_set = MRIDatasetClassifier(self.path, transform=train_transform)
+        all_set = MRIDatasetClassifier(self.path, transform=train_transform, size=self.size)
         train_set, valid_set = validation_split(all_set, val_share=self.val_share)
 
         train_loader = DataLoader(train_set,
