@@ -59,7 +59,8 @@ class Train:
                  mean=0.5,
                  std=0.5,
                  plot_perform=True,
-                 val_share=0.1
+                 val_share=0.1,
+                 mode='valid'
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -94,6 +95,7 @@ class Train:
         self.init_func = init_func
         self.val_share = val_share
         self.plot_perform = plot_perform
+        self.mode = mode
 
     def train(self, params):
         if torch.cuda.is_available():
