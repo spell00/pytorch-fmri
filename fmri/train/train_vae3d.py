@@ -60,7 +60,8 @@ class Train:
                  std=0.5,
                  plot_perform=True,
                  val_share=0.1,
-                 mode='valid'
+                 mode='valid',
+                 early_stop=100
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -96,6 +97,7 @@ class Train:
         self.val_share = val_share
         self.plot_perform = plot_perform
         self.mode = mode
+        self.early_stop = early_stop
 
     def train(self, params):
         if torch.cuda.is_available():
@@ -333,7 +335,7 @@ class Train:
         early_stop_counter = 0
 
         for epoch in range(epoch_offset, self.epochs):
-            if early_stop_counter == 500:
+            if early_stop_counter == self.early_stop:
                 if self.verbose > 0:
                     print('EARLY STOPPING.')
                 break
