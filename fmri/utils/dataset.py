@@ -32,6 +32,30 @@ def _resize_data(data, new_size=(160, 160, 160)):
     return new_data
 
 
+class EEGDataset(Dataset):
+    def __init__(self, path, transform=None, crop_size=100000, device='cuda'):
+        self.path = path
+        self.device = device
+        self.crop_size = crop_size
+        self.samples = os.listdir(path)
+        self.transform = transform
+        self.crop_size = crop_size
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        x = self.samples[idx]
+        x = np.load(self.path + x)
+        max_start_crop = x.shape[1] - self.crop_size
+        ran = np.random.randint(0, max_start_crop)
+        x = torch.Tensor(x)[:, ran:ran + self.crop_size]  # .to(self.device)
+        # x.requires_grad = False
+        if self.transform:
+            x = self.transform(x)
+        return x
+
+
 class MRIDataset(Dataset):
     def __init__(self, path, transform=None, size=32, device='cuda'):
         self.path = path
@@ -53,6 +77,7 @@ class MRIDataset(Dataset):
         if self.transform:
             x = self.transform(x)
         return x.unsqueeze(0)
+
 
 class MRIDatasetClassifier(Dataset):
     def __init__(self, path, transform=None, size=32, device='cuda'):
@@ -109,6 +134,8 @@ def load_checkpoint(checkpoint_path,
                     h_last,
                     n_elements,
                     name="vae_1dcnn",
+                    model_name=Autoencoder3DCNN
+
                     ):
     # if checkpoint_path
     losses_recon = {
@@ -158,7 +185,8 @@ def load_checkpoint(checkpoint_path,
                             n_res=n_res,
                             resblocks=resblocks,
                             h_last=z_dim,
-                            n_elements=n_elements
+                            n_elements=n_elements,
+                            model_name=Autoencoder3DCNN
                             )
     checkpoint_dict = torch.load(checkpoint_path + '/' + name, map_location='cpu')
     epoch = checkpoint_dict['epoch']
@@ -205,55 +233,59 @@ def save_checkpoint(model,
                     flow_type='vanilla',
                     best_loss=-1,
                     has_dense=True,
-                    name="vae_3dcnn"):
+                    name="vae_3dcnn",
+                    model_name=Autoencoder3DCNN
+                    ):
     if not save:
         return
     if name == 'classifier':
-        model_for_saving = Autoencoder3DCNN(maxpool=maxpool,
-                                            padding=padding,
-                                            batchnorm=batchnorm,
-                                            padding_deconv=padding_deconv,
-                                            flow_type=flow_type,
-                                            has_dense=has_dense,
-                                            n_flows=n_flows,
-                                            z_dim=z_dim,
-                                            n_res=n_res,
-                                            resblocks=resblocks,
-                                            h_last=h_last,
-                                            gated=gated,
-                                            in_channels=in_channels,
-                                            out_channels=out_channels,
-                                            kernel_sizes=kernel_sizes,
-                                            kernel_sizes_deconv=kernel_sizes_deconv,
-                                            strides=strides,
-                                            strides_deconv=strides_deconv,
-                                            dilatations=dilatations,
-                                            dilatations_deconv=dilatations_deconv,
-                                            ).cuda()
+        model_for_saving = model_name(maxpool=maxpool,
+                                      padding=padding,
+                                      batchnorm=batchnorm,
+                                      padding_deconv=padding_deconv,
+                                      flow_type=flow_type,
+                                      has_dense=has_dense,
+                                      n_flows=n_flows,
+                                      z_dim=z_dim,
+                                      n_res=n_res,
+                                      resblocks=resblocks,
+                                      h_last=h_last,
+                                      gated=gated,
+                                      in_channels=in_channels,
+                                      out_channels=out_channels,
+                                      kernel_sizes=kernel_sizes,
+                                      kernel_sizes_deconv=kernel_sizes_deconv,
+                                      strides=strides,
+                                      strides_deconv=strides_deconv,
+                                      dilatations=dilatations,
+                                      dilatations_deconv=dilatations_deconv,
+                                      model_name=Autoencoder3DCNN
+                                      ).cuda()
     model_type = name.split("_")[0]
     if model_type == 'vae':
         if flow_type != 'o-sylvester':
-            model_for_saving = Autoencoder3DCNN(maxpool=maxpool,
-                                                padding=padding,
-                                                batchnorm=batchnorm,
-                                                padding_deconv=padding_deconv,
-                                                flow_type=flow_type,
-                                                has_dense=has_dense,
-                                                n_flows=n_flows,
-                                                z_dim=z_dim,
-                                                n_res=n_res,
-                                                resblocks=resblocks,
-                                                h_last=h_last,
-                                                gated=gated,
-                                                in_channels=in_channels,
-                                                out_channels=out_channels,
-                                                kernel_sizes=kernel_sizes,
-                                                kernel_sizes_deconv=kernel_sizes_deconv,
-                                                strides=strides,
-                                                strides_deconv=strides_deconv,
-                                                dilatations=dilatations,
-                                                dilatations_deconv=dilatations_deconv,
-                                                )
+            model_for_saving = model_name(maxpool=maxpool,
+                                          padding=padding,
+                                          batchnorm=batchnorm,
+                                          padding_deconv=padding_deconv,
+                                          flow_type=flow_type,
+                                          has_dense=has_dense,
+                                          n_flows=n_flows,
+                                          z_dim=z_dim,
+                                          n_res=n_res,
+                                          resblocks=resblocks,
+                                          # h_last=h_last,
+                                          gated=gated,
+                                          in_channels=in_channels,
+                                          out_channels=out_channels,
+                                          kernel_sizes=kernel_sizes,
+                                          kernel_sizes_deconv=kernel_sizes_deconv,
+                                          strides=strides,
+                                          strides_deconv=strides_deconv,
+                                          dilatations=dilatations,
+                                          dilatations_deconv=dilatations_deconv,
+                                          # model_name=Autoencoder3DCNN
+                                          )
         else:
             model_for_saving = SylvesterVAE(z_dim=z_dim,
                                             maxpool=maxpool,
@@ -277,7 +309,8 @@ def save_checkpoint(model,
                                             n_flows=n_flows,
                                             num_elements=n_elements,
                                             auxiliary=False,
-                                            a_dim=0
+                                            a_dim=0,
+                                            model_name=Autoencoder3DCNN
                                             )
     elif model_type == "classif":
         model_for_saving = ConvResnet3D(maxpool,

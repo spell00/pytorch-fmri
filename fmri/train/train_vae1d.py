@@ -6,10 +6,9 @@ import json
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from fmri.utils.CycleAnnealScheduler import CycleScheduler
-from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDataset
-from fmri.utils.transform_3d import Normalize, Flip90, Flip180, Flip270, XFlip, YFlip, ZFlip
-from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
-from fmri.models.unsupervised.SylvesterVAE3DCNN import SylvesterVAE
+from fmri.utils.dataset import load_checkpoint, save_checkpoint, EEGDataset
+from fmri.models.unsupervised.VAE_1DCNN import Autoencoder1DCNN
+from fmri.models.unsupervised.SylvesterVAE1DCNN import SylvesterVAE
 from fmri.utils.plot_performance import plot_performance
 import torchvision
 from torchvision import transforms
@@ -22,7 +21,6 @@ import os
 output_directory = "checkpoints"
 import nibabel as nib
 from fmri.utils.utils import validation_split
-
 
 
 class Train:
@@ -137,7 +135,7 @@ class Train:
                   'optimizer_type: ' + optimizer_type + "\n\t",
                   )
 
-        self.modelname = "vae_3dcnn_" \
+        self.modelname = "vae_1dcnn_" \
                          + '_flows' + self.flow_type + str(n_flows) \
                          + '_bn' + str(self.batchnorm) \
                          + '_niter' + str(niter) \
@@ -155,7 +153,7 @@ class Train:
                          + '_l2' + l2.__format__('e') \
                          + '_size' + str(self.size)
         if self.flow_type != 'o-sylvester':
-            model = Autoencoder3DCNN(z_dim,
+            model = Autoencoder1DCNN(z_dim,
                                      self.maxpool,
                                      self.in_channels,
                                      self.out_channels,
@@ -256,23 +254,14 @@ class Train:
                                         n_res=n_res,
                                         resblocks=resblocks,
                                         h_last=self.out_channels[-1],
-                                        n_elements=num_elements
+                                        n_elements=num_elements,
+                                        model_name=Autoencoder1DCNN
                                         )
         model = model.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
         # targets = torch.Tensor([0 for _ in t1])
 
-        train_transform = transforms.Compose([
-            XFlip(),
-            YFlip(),
-            ZFlip(),
-            Flip90(),
-            Flip180(),
-            Flip270(),
-            torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
-            Normalize()
-        ])
-        all_set = MRIDataset(self.path, transform=train_transform)
+        all_set = EEGDataset(self.path, transform=None)
         train_set, valid_set = validation_split(all_set, val_share=self.val_share)
 
         train_loader = DataLoader(train_set,
@@ -516,7 +505,8 @@ class Train:
                                     flow_type=self.flow_type,
                                     n_res=n_res,
                                     resblocks=resblocks,
-                                    h_last=z_dim
+                                    h_last=z_dim,
+                                    model_name=Autoencoder1DCNN
                                     )
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 0:
@@ -552,32 +542,32 @@ if __name__ == "__main__":
 
     size = 32
     z_dim = 50
-    in_channels = [1, 32, 64, 128, 256]
-    out_channels = [32, 64, 128, 256, 256]
-    kernel_sizes = [3, 3, 3, 3, 3]
-    kernel_sizes_deconv = [3, 3, 3, 3, 3]
-    strides = [1, 1, 1, 1, 1]
-    strides_deconv = [1, 1, 1, 1, 1]
-    dilatations = [1, 1, 1, 1, 1]
-    dilatations_Deconv = [1, 1, 1, 1, 1, 1]
-    paddings = [1, 1, 1, 1, 1]
-    paddings_deconv = [1, 1, 1, 1, 1]
-    dilatations_deconv = [1, 1, 1, 1, 1]
+    in_channels = [129, 32, 64, 128]
+    out_channels = [32, 64, 128, 256]
+    kernel_sizes = [6, 6, 6, 6, ]
+    kernel_sizes_deconv = [6, 6, 6, 6, ]
+    strides = [8, 8, 8, 4, ]
+    strides_deconv = [8, 8, 8, 4, ]
+    dilatations = [8, 4, 4, 4, ]
+    dilatations_Deconv = [8, 8, 8, 8, ]
+    paddings = [1, 1, 1, 1, ]
+    paddings_deconv = [1, 1, 1, 1, ]
+    dilatations_deconv = [1, 1, 1, 1, ]
     n_flows = 10
-    bs = 8
+    bs = 2
     maxpool = 2
-    flow_type = 'o-sylvester'
+    flow_type = 'hf'
     epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True
     gated = False
     resblocks = True
     checkpoint_path = "checkpoints"
-    basedir = '/Users/simonpelletier/Downloads/images/t1/'
-    path = basedir + '32x32/'
+    basedir = '/home/simon/loris-api-presentation/recordings/reduced/'
+    path = basedir
 
     n_epochs = 10000
-    save = True
+    save = False
     training = Train(in_channels=in_channels,
                      out_channels=out_channels,
                      kernel_sizes=kernel_sizes,
