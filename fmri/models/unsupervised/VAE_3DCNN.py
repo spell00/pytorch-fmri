@@ -226,6 +226,7 @@ class Autoencoder3DCNN(torch.nn.Module):
         self.dense2 = torch.nn.Linear(in_features=z_dim, out_features=out_channels[-1])
         self.dense1_bn = nn.BatchNorm1d(num_features=z_dim)
         self.dense2_bn = nn.BatchNorm1d(num_features=out_channels[-1])
+        self.dropout3d = nn.Dropout3d(0.5)
         self.dropout = nn.Dropout(0.5)
         self.maxpool = nn.MaxPool3d(maxpool, return_indices=True)
         self.maxunpool = nn.MaxUnpool3d(maxpool)
@@ -301,13 +302,14 @@ class Autoencoder3DCNN(torch.nn.Module):
                         if x.shape[0] != 1:
                             x = self.bns[i - 1].to(self.device)(x)
                     x = self.resconv[j](x)
+                    x = self.dropout3d(x)
                     j += 1
             x = self.conv_layers[i](x)
             if self.batchnorm:
                 if x.shape[0] != 1:
                     x = self.bns[i].to(self.device)(x)
             x = self.activation(x)
-            x = self.dropout(x)
+            x = self.dropout3d(x)
             x, self.indices[i] = self.maxpool(x)
 
         z = x.squeeze()
@@ -338,6 +340,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                         if x.shape[0] != 1:
                             x = self.bns_deconv[i - 1].to(self.device)(x)
                     x = self.resdeconv[j](x)
+                    x = self.dropout3d(x)
                     j += 1
             ind = self.indices[len(self.indices) - 1 - i]
             x = self.maxunpool(x[:, :, :ind.shape[2], :ind.shape[3], :ind.shape[4]], ind)
@@ -347,7 +350,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                     if x.shape[0] != 1:
                         x = self.bns_deconv[i].to(self.device)(x)
                 x = self.activation(x)
-                x = self.dropout(x)
+                x = self.dropout3d(x)
 
         if (len(x.shape) == 3):
             x.unsqueeze(0)
