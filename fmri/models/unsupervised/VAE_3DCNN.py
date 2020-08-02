@@ -162,9 +162,12 @@ class Autoencoder3DCNN(torch.nn.Module):
         self.resconv = []
         self.resdeconv = []
         self.bns_deconv = []
+        self.activations = []
+        self.activation = activation()
+        self.activation_deconv = activation()
+        self.activations_deconv = []
         self.indices = [torch.Tensor() for _ in range(len(in_channels))]
         self.GaussianSample = GaussianSample(z_dim, z_dim)
-        self.activation = activation()
 
         self.n_res = n_res
 
@@ -197,9 +200,9 @@ class Autoencoder3DCNN(torch.nn.Module):
                                 )]
             if resblocks and i != 0:
                 for _ in range(n_res):
-                    self.resconv += [ResBlock(ins, outs, activation,device)]
+                    self.resconv += [ResBlock(ins, outs, activation, device)]
             self.bns += [nn.BatchNorm3d(num_features=outs)]
-
+            self.activations += [activation()]
         for i, (ins, outs, ksize, stride, dilats, pad) in enumerate(zip(reversed(out_channels),
                                                                         reversed(in_channels),
                                                                         kernel_sizes_deconv,
@@ -221,6 +224,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                     self.resdeconv += [ResBlockDeconv(ins, outs, activation, device)]
 
             self.bns_deconv += [nn.BatchNorm3d(num_features=outs)]
+            self.activations_deconv += [activation()]
 
         self.dense1 = torch.nn.Linear(in_features=out_channels[-1], out_features=z_dim)
         self.dense2 = torch.nn.Linear(in_features=z_dim, out_features=out_channels[-1])
@@ -308,7 +312,7 @@ class Autoencoder3DCNN(torch.nn.Module):
             if self.batchnorm:
                 if x.shape[0] != 1:
                     x = self.bns[i].to(self.device)(x)
-            x = self.activation(x)
+            x = self.activations[i](x)
             x = self.dropout3d(x)
             x, self.indices[i] = self.maxpool(x)
 
@@ -325,7 +329,7 @@ class Autoencoder3DCNN(torch.nn.Module):
     def decoder(self, z):
         if self.has_dense:
             z = self.dense2(z)
-            z = self.activation(z)
+            z = self.activation_deconv(z)
             if self.batchnorm:
                 if z.shape[0] != 1:
                     z = self.dense2_bn(z)
@@ -349,7 +353,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                 if self.batchnorm:
                     if x.shape[0] != 1:
                         x = self.bns_deconv[i].to(self.device)(x)
-                x = self.activation(x)
+                x = self.activations_deconv[i](x)
                 x = self.dropout3d(x)
 
         if (len(x.shape) == 3):
