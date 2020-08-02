@@ -469,12 +469,11 @@ class Train:
                 lr_schedule.step(losses["valid"][-1])
             # should be valid, but train is ok to test if it can be done without caring about
             # generalisation
-            mode = 'valid'
-            if (losses[mode][-1] < best_loss or best_loss == -1) and not np.isnan(losses[mode][-1]):
+            if (losses[self.mode][-1] < best_loss or best_loss == -1) and not np.isnan(losses[self.mode][-1]):
                 if self.verbose > 1:
-                    print('BEST EPOCH!', losses[mode][-1])
+                    print('BEST EPOCH!', losses[self.mode][-1])
                 early_stop_counter = 0
-                best_loss = losses[mode][-1]
+                best_loss = losses[self.mode][-1]
                 best_epoch = True
             else:
                 early_stop_counter += 1
