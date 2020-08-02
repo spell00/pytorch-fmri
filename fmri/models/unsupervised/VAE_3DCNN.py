@@ -233,8 +233,8 @@ class Autoencoder3DCNN(torch.nn.Module):
         self.deconv_layers = nn.ModuleList(self.deconv_layers)
         # self.bns = nn.ModuleList(self.bns)
         # self.bns_deconv = nn.ModuleList(self.bns_deconv)
-        # self.resconv = nn.ModuleList(self.resconv)
-        # self.resdeconv = nn.ModuleList(self.resdeconv)
+        self.resconv = nn.ModuleList(self.resconv)
+        self.resdeconv = nn.ModuleList(self.resdeconv)
         self.flow_type = flow_type
         self.n_flows = n_flows
         if self.flow_type == "nf":
