@@ -542,7 +542,7 @@ class Train:
             if self.verbose > 0:
                 print('BEST LOSS :', best_loss)
             best_losses += [best_loss]
-
+        return torch.min(best_losses)
 
 if __name__ == "__main__":
     torch.backends.cudnn.enabled = True
@@ -603,12 +603,12 @@ if __name__ == "__main__":
                      save=save,
                      maxpool=maxpool,
                      plot_perform=False,
-                     activation=Swish,
-                     mean=0.1,
-                     std=0.1,
+                     activation=torch.nn.ReLU,
+                     mean=0.5,
+                     std=0.5,
                      init_func=torch.nn.init.xavier_uniform_,
                      mode='valid',
-                     load=True
+                     load=False,
                      )
     best_parameters, values, experiment, model = optimize(
         parameters=[
@@ -631,7 +631,7 @@ if __name__ == "__main__":
         evaluation_function=training.train,
         objective_name='loss',
         minimize=True,
-        total_trials=100
+        total_trials=3
     )
     from matplotlib import pyplot as plt
 
