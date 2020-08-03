@@ -519,7 +519,8 @@ class Train:
                                     flow_type=self.flow_type,
                                     n_res=n_res,
                                     resblocks=resblocks,
-                                    h_last=z_dim
+                                    h_last=z_dim,
+                                    n_elements=num_elements,
                                     )
             if epoch % self.epochs_per_print == 0:
                 if self.verbose > 0:
@@ -555,32 +556,32 @@ if __name__ == "__main__":
 
     size = 32
     z_dim = 50
-    in_channels = [1, 32, 64, 128, 256]
-    out_channels = [32, 64, 128, 256, 256]
-    kernel_sizes = [3, 3, 3, 3, 3]
-    kernel_sizes_deconv = [3, 3, 3, 3, 3]
-    strides = [1, 1, 1, 1, 1]
-    strides_deconv = [1, 1, 1, 1, 1]
-    dilatations = [1, 1, 1, 1, 1]
-    dilatations_Deconv = [1, 1, 1, 1, 1, 1]
-    paddings = [1, 1, 1, 1, 1]
-    paddings_deconv = [1, 1, 1, 1, 1]
-    dilatations_deconv = [1, 1, 1, 1, 1]
+    in_channels = [1, 64, 128, 128, 128, 256, 256]
+    out_channels = [64, 128, 128, 128, 256, 256, 256]
+    kernel_sizes = [3, 3, 3, 3, 3, 3, 3]
+    kernel_sizes_deconv = [3, 3, 3, 3, 3, 3, 3]
+    strides = [1, 1, 1, 1, 1, 1, 1]
+    strides_deconv = [1, 1, 1, 1, 1, 1, 1]
+    dilatations = [1, 1, 1, 1, 1, 1, 1]
+    dilatations_Deconv = [1, 1, 1, 1, 1, 1, 1]
+    paddings = [2, 2, 2, 2, 2, 2, 1]
+    paddings_deconv = [1, 1, 1, 1, 1, 1, 1]
+    dilatations_deconv = [1, 1, 1, 1, 1, 1, 1]
     n_flows = 10
-    bs = 8
+    bs = 5
     maxpool = 2
-    flow_type = 'o-sylvester'
+    flow_type = 'nf'
     epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True
     gated = False
     resblocks = True
     checkpoint_path = "checkpoints"
-    basedir = '/Users/simonpelletier/Downloads/images/t1/'
+    basedir = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
     path = basedir + '32x32/'
 
     n_epochs = 10000
-    save = False
+    save = True
     training = Train(in_channels=in_channels,
                      out_channels=out_channels,
                      kernel_sizes=kernel_sizes,
@@ -603,8 +604,9 @@ if __name__ == "__main__":
                      flow_type=flow_type,
                      save=save,
                      maxpool=maxpool,
-                     activation=Swish,
-                     init_func=torch.nn.init.kaiming_uniform_
+                     activation=torch.nn.ReLU,
+                     init_func=torch.nn.init.kaiming_normal_,
+                     mode='train'
                      )
     best_parameters, values, experiment, model = optimize(
         parameters=[
@@ -612,8 +614,8 @@ if __name__ == "__main__":
             {"name": "mom_range", "type": "choice", "values": [0, 0]},
             {"name": "num_elements", "type": "range", "bounds": [1, 5]},
             {"name": "niter", "type": "choice", "values": [10, 10]},
-            {"name": "n_res", "type": "range", "bounds": [0, 10]},
-            {"name": "z_dim", "type": "range", "bounds": [50, 256]},
+            {"name": "n_res", "type": "range", "bounds": [0, 20]},
+            {"name": "z_dim", "type": "range", "bounds": [200, 256]},
             {"name": "n_flows", "type": "range", "bounds": [2, 20]},
             {"name": "scheduler", "type": "choice", "values":
                 ['ReduceLROnPlateau', 'ReduceLROnPlateau']},

@@ -99,8 +99,9 @@ class ResBlock(nn.Module):
             nn.Conv3d(channel, in_channel, 1),
         )
         self.conv.apply(random_init)
+
     def forward(self, input):
-        out = self.conv.to(self.device)(input)
+        out = self.conv(input)
         out += input
 
         return out
@@ -119,7 +120,7 @@ class ResBlockDeconv(nn.Module):
         self.conv.apply(random_init)
 
     def forward(self, input):
-        out = self.conv.to(self.device)(input)
+        out = self.conv(input)
         out += input
 
         return out
@@ -228,9 +229,9 @@ class Autoencoder3DCNN(torch.nn.Module):
 
         self.dense1 = torch.nn.Linear(in_features=out_channels[-1], out_features=z_dim)
         self.dense2 = torch.nn.Linear(in_features=z_dim, out_features=out_channels[-1])
-        self.dense1_bn = nn.BatchNorm1d(num_features=z_dim)
-        self.dense2_bn = nn.BatchNorm1d(num_features=out_channels[-1])
-        self.dropout3d = nn.Dropout3d(0.5)
+        self.dense2_bn = nn.BatchNorm1d(num_features=z_dim)
+        self.dense1_bn = nn.BatchNorm1d(num_features=out_channels[-1])
+        self.dropout3d = nn.Dropout3d(0.2)
         self.dropout = nn.Dropout(0.5)
         self.maxpool = nn.MaxPool3d(maxpool, return_indices=True)
         self.maxunpool = nn.MaxUnpool3d(maxpool)
@@ -304,35 +305,35 @@ class Autoencoder3DCNN(torch.nn.Module):
                 for _ in range(self.n_res):
                     if self.batchnorm:
                         if x.shape[0] != 1:
-                            x = self.bns[i - 1].to(self.device)(x)
+                            x = self.bns[i - 1](x)
                     x = self.resconv[j](x)
                     x = self.dropout3d(x)
                     j += 1
             x = self.conv_layers[i](x)
             if self.batchnorm:
                 if x.shape[0] != 1:
-                    x = self.bns[i].to(self.device)(x)
+                    x = self.bns[i](x)
             x = self.activations[i](x)
             x = self.dropout3d(x)
             x, self.indices[i] = self.maxpool(x)
 
         z = x.squeeze()
         if self.has_dense:
-            z = self.dense1(z)
-            z = self.activation(z)
             if self.batchnorm:
                 if z.shape[0] != 1:
                     z = self.dense1_bn(z)
+            z = self.dense1(z)
+            z = self.activation(z)
             z = self.dropout(z)
         return z
 
     def decoder(self, z):
         if self.has_dense:
-            z = self.dense2(z)
-            z = self.activation_deconv(z)
             if self.batchnorm:
                 if z.shape[0] != 1:
                     z = self.dense2_bn(z)
+            z = self.dense2(z)
+            z = self.activation_deconv(z)
             z = self.dropout(z)
 
         j = 0
