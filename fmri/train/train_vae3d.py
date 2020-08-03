@@ -409,10 +409,11 @@ class Train:
 
                 img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
                 recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
-                if 'views' not in os.listdir():
-                    os.mkdir('views')
-                img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
-                recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
+                if self.save:
+                    if 'views' not in os.listdir():
+                        os.mkdir('views')
+                    img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
+                    recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
 
                 losses["train"] += [np.mean(train_losses)]
                 kl_divs["train"] += [np.mean(train_kld)]
@@ -479,10 +480,11 @@ class Train:
                     early_stop_counter += 1
 
                 if epoch % self.epochs_per_checkpoint == 0:
-                    img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
-                    recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
-                    img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
-                    recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
+                    if self.save:
+                        img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
+                        recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
+                        img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
+                        recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
                     if best_epoch and self.save:
                         if self.verbose > 1:
                             print('Saving model...')
