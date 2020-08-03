@@ -60,7 +60,8 @@ class Train:
                  val_share=0.1,
                  mode='valid',
                  early_stop=500,
-                 cv=3
+                 cv=3,
+                 load=False,
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -86,6 +87,7 @@ class Train:
         self.flow_type = flow_type
         self.maxpool = maxpool
         self.save = save
+        self.load = load
         self.verbose = verbose
         self.path = path
         self.size = size
@@ -98,6 +100,7 @@ class Train:
         self.mode = mode
         self.early_stop = early_stop
         self.cross_validation = cv
+        self.model_name = ''
 
     def train(self, params):
         if torch.cuda.is_available():
@@ -141,25 +144,35 @@ class Train:
                   'l1: ' + l1.__format__('e') + "\n\t",
                   'l2: ' + l2.__format__('e') + "\n\t",
                   'optimizer_type: ' + optimizer_type + "\n\t",
+                  'in_channels:' + "-".join([str(item) for item in self.in_channels]) + "\n\t",
+                  'out_channels:' + "-".join([str(item) for item in self.out_channels]) + "\n\t",
+                  'kernel_sizes:' + "-".join([str(item) for item in self.kernel_sizes]) + "\n\t",
+                  'kernel_sizes_deconv:' + "-".join([str(item) for item in self.kernel_sizes_deconv]) + "\n\t",
+                  'paddings:' + "-".join([str(item) for item in self.padding]) + "\n\t",
+                  'padding_deconv:' + "-".join([str(item) for item in self.padding_deconv]) + "\n\t",
+                  'dilatations:' + "-".join([str(item) for item in self.dilatations]) + "\n\t",
+                  'dilatations_deconv:' + "-".join([str(item) for item in self.dilatations_deconv]) + "\n\t",
                   )
 
-        self.modelname = "vae_3dcnn_" \
-                         + '_flows' + self.flow_type + str(n_flows) \
-                         + '_bn' + str(self.batchnorm) \
-                         + '_niter' + str(niter) \
-                         + '_nres' + str(n_res) \
-                         + '_momrange' + str(mom_range) \
-                         + '_momentum' + str(momentum) \
-                         + '_' + str(optimizer_type) \
-                         + "_zdim" + str(z_dim) \
-                         + '_gated' + str(self.gated) \
-                         + '_resblocks' + str(self.resblocks) \
-                         + '_initlr' + learning_rate.__format__('e') \
-                         + '_warmup' + str(warmup) \
-                         + '_wd' + weight_decay.__format__('e') \
-                         + '_l1' + l1.__format__('e') \
-                         + '_l2' + l2.__format__('e') \
-                         + '_size' + str(self.size)
+        self.model_name = "vae_3dcnn_" \
+                          + '_flows' + self.flow_type + str(n_flows) \
+                          + '_bn' + str(self.batchnorm) \
+                          + '_niter' + str(niter) \
+                          + '_nres' + str(n_res) \
+                          + '_momrange' + str(mom_range) \
+                          + '_momentum' + str(momentum) \
+                          + '_' + str(optimizer_type) \
+                          + "_zdim" + str(z_dim) \
+                          + '_gated' + str(self.gated) \
+                          + '_resblocks' + str(self.resblocks) \
+                          + '_initlr' + learning_rate.__format__('e') \
+                          + '_warmup' + str(warmup) \
+                          + '_wd' + weight_decay.__format__('e') \
+                          + '_l1' + l1.__format__('e') \
+                          + '_l2' + l2.__format__('e') \
+                          + '_size' + str(self.size) \
+                          + "-".join([str(item) for item in self.in_channels]) \
+
         if self.flow_type != 'o-sylvester':
             model = Autoencoder3DCNN(z_dim,
                                      self.maxpool,
@@ -226,15 +239,12 @@ class Train:
                                             momentum=momentum)
         else:
             exit('error: no such optimizer type available')
-        # if self.fp16_run:
-        #     from apex import amp
-        #    model, optimizer = amp.initialize(model, optimizer, opt_level='O2')
 
         # Load checkpoint if one exists
         epoch = 0
         best_loss = -1
-        if self.checkpoint_path is not None and self.save:
-            model, optimizer, \
+        if self.checkpoint_path is not None and self.load:
+            model, _, \
             epoch, losses, \
             kl_divs, losses_recon, \
             best_loss = load_checkpoint(checkpoint_path,
@@ -257,7 +267,7 @@ class Train:
                                         strides_deconv=self.strides_deconv,
                                         dilatations=self.dilatations,
                                         dilatations_deconv=self.dilatations_deconv,
-                                        name=self.modelname,
+                                        name=self.model_name,
                                         n_flows=n_flows,
                                         n_res=n_res,
                                         resblocks=resblocks,
@@ -265,8 +275,6 @@ class Train:
                                         n_elements=num_elements
                                         )
         model = model.to(device)
-        # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
-        # targets = torch.Tensor([0 for _ in t1])
 
         train_transform = transforms.Compose([
             XFlip(),
@@ -357,11 +365,9 @@ class Train:
                 train_recons = []
 
                 for i, batch in enumerate(train_loader):
-                    #    pbar.update(1)
                     model.zero_grad()
                     images = batch
                     images = torch.autograd.Variable(images).to(device)
-                    # images = images.unsqueeze(1)
                     reconstruct, kl = model(images)
                     reconstruct = reconstruct[:, :,
                                   :images.shape[2],
@@ -384,10 +390,7 @@ class Train:
                             l2_reg = l2 + torch.norm(param, 1)
                     loss += l1 * l1_reg
                     loss += l2 * l2_reg
-                    # torch.nn.utils.clip_grad_norm_(model.parameters(), 1e-8)
                     loss.backward()
-                    # not sure if before or after
-                    # torch.nn.utils.clip_grad_norm_(model.parameters(), 100)
                     if scheduler == "CycleScheduler":
                         lr_schedule.step()
 
@@ -400,21 +403,16 @@ class Train:
                         )).item())
                     ]
 
-                    # if self.fp16_run:
-                    #    with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    #        scaled_loss.backward()
-                    #    del scaled_loss
-                    # else:
                     optimizer.step()
                     logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
                     del kl, loss_recon, kl_div, loss
 
                 img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
                 recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
-                # if 'views' not in os.listdir():
-                #     os.mkdir('views')
-                # img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
-                # recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
+                if 'views' not in os.listdir():
+                    os.mkdir('views')
+                img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
+                recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
 
                 losses["train"] += [np.mean(train_losses)]
                 kl_divs["train"] += [np.mean(train_kld)]
@@ -442,12 +440,9 @@ class Train:
                 valid_kld = []
                 valid_recons = []
                 valid_abs_error = []
-                # pbar = tqdm(total=len(valid_loader))
                 for i, batch in enumerate(valid_loader):
-                    #    pbar.update(1)
                     images = batch
                     images = images.to(device)
-                    # images = images.unsqueeze(1)
                     reconstruct, kl = model(images)
                     reconstruct = reconstruct[:, :,
                                   :images.shape[2],
@@ -474,8 +469,6 @@ class Train:
                 if scheduler == "ReduceLROnPlateau":
                     if epoch - epoch_offset > 5:
                         lr_schedule.step(losses["valid"][-1])
-                # should be valid, but train is ok to test if it can be done without caring about
-                # generalisation
                 if (losses[self.mode][-1] < best_loss or best_loss == -1) and not np.isnan(losses[self.mode][-1]):
                     if self.verbose > 1:
                         print('BEST EPOCH!', losses[self.mode][-1])
@@ -486,12 +479,10 @@ class Train:
                     early_stop_counter += 1
 
                 if epoch % self.epochs_per_checkpoint == 0:
-                    # img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
-                    # recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
-                    # if 'views' not in os.listdir():
-                    #     os.mkdir('views')
-                    # img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
-                    # recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
+                    img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
+                    recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
+                    img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
+                    recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
                     if best_epoch and self.save:
                         if self.verbose > 1:
                             print('Saving model...')
@@ -519,7 +510,7 @@ class Train:
                                         dilatations_deconv=self.dilatations_deconv,
                                         best_loss=best_loss,
                                         save=self.save,
-                                        name=self.modelname,
+                                        name=self.model_name,
                                         n_flows=n_flows,
                                         flow_type=self.flow_type,
                                         n_res=n_res,
@@ -547,22 +538,24 @@ class Train:
                     plot_performance(loss_total=losses, losses_recon=losses_recon, kl_divs=kl_divs, shapes=shapes,
                                      results_path="../figures",
                                      filename="training_loss_trace_"
-                                              + self.modelname + '.jpg')
+                                              + self.model_name + '.jpg')
             if self.verbose > 0:
                 print('BEST LOSS :', best_loss)
             best_losses += [best_loss]
 
 
 if __name__ == "__main__":
+    torch.backends.cudnn.enabled = True
+    torch.backends.cudnn.benchmark = True
     parser = argparse.ArgumentParser()
-    torch.manual_seed(11)
+    torch.manual_seed(42)
 
-    random.seed(10)
+    random.seed(42)
 
     size = 32
     z_dim = 50
-    in_channels = [1, 128, 128, 256, 256]
-    out_channels = [128, 128, 256, 256, 256]
+    in_channels = [1, 128, 128, 256, 300]
+    out_channels = [128, 128, 256, 300, 300]
     kernel_sizes = [3, 3, 3, 3, 3]
     kernel_sizes_deconv = [3, 3, 3, 3, 3]
     strides = [1, 1, 1, 1, 1]
@@ -573,9 +566,9 @@ if __name__ == "__main__":
     paddings_deconv = [1, 1, 1, 1, 1]
     dilatations_deconv = [1, 1, 1, 1, 1]
     n_flows = 10
-    bs = 6
+    bs = 3
     maxpool = 2
-    flow_type = 'hf'
+    flow_type = 'o-sylvester'
     epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True
@@ -586,7 +579,7 @@ if __name__ == "__main__":
     path = basedir + '32x32/'
 
     n_epochs = 10000
-    save = False
+    save = True
     training = Train(in_channels=in_channels,
                      out_channels=out_channels,
                      kernel_sizes=kernel_sizes,
@@ -609,27 +602,31 @@ if __name__ == "__main__":
                      flow_type=flow_type,
                      save=save,
                      maxpool=maxpool,
-                     activation=torch.nn.ReLU,
-                     init_func=torch.nn.init.kaiming_normal_,
-                     mode='train'
+                     plot_perform=False,
+                     activation=Swish,
+                     mean=0.1,
+                     std=0.1,
+                     init_func=torch.nn.init.xavier_uniform_,
+                     mode='valid',
+                     load=True
                      )
     best_parameters, values, experiment, model = optimize(
         parameters=[
             {"name": "warmup", "type": "choice", "values": [0, 0]},
-            {"name": "mom_range", "type": "range", "bounds": [0., 0.5]},
+            {"name": "mom_range", "type": "range", "bounds": [0., 0.1]},
             {"name": "num_elements", "type": "range", "bounds": [1, 5]},
-            {"name": "niter", "type": "choice", "values": [10, 1000]},
-            {"name": "n_res", "type": "range", "bounds": [0, 10]},
+            {"name": "niter", "type": "choice", "values": [10, 10]},
+            {"name": "n_res", "type": "range", "bounds": [1, 20]},
             {"name": "z_dim", "type": "range", "bounds": [200, 256]},
-            {"name": "n_flows", "type": "range", "bounds": [2, 20]},
+            {"name": "n_flows", "type": "range", "bounds": [2, 10]},
             {"name": "scheduler", "type": "choice", "values":
-                ['ReduceLROnPlateau', 'ReduceLROnPlateau']},
+                ['CycleScheduler', 'CycleScheduler']},
             {"name": "optimizer", "type": "choice", "values": ['rmsprop', 'rmsprop']},
             {"name": "l1", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "l2", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "momentum", "type": "range", "bounds": [0.9, 1.]},
-            {"name": "learning_rate", "type": "range", "bounds": [1e-5, 1e-4], "log_scale": True},
+            {"name": "learning_rate", "type": "range", "bounds": [1e-4, 1e-3], "log_scale": True},
         ],
         evaluation_function=training.train,
         objective_name='loss',

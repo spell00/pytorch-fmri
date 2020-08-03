@@ -191,14 +191,13 @@ def load_checkpoint(checkpoint_path,
     checkpoint_dict = torch.load(checkpoint_path + '/' + name, map_location='cpu')
     epoch = checkpoint_dict['epoch']
     best_loss = checkpoint_dict['best_loss']
-    optimizer.load_state_dict(checkpoint_dict['optimizer'])
+    # optimizer.load_state_dict(checkpoint_dict['optimizer'])
     model_for_loading = checkpoint_dict['model']
     model.load_state_dict(model_for_loading.state_dict())
     losses_recon = checkpoint_dict['losses_recon']
     kl_divs = checkpoint_dict['kl_divs']
     losses = checkpoint_dict['losses']
-    print("Loaded checkpoint '{}' (epoch {})".format(
-        checkpoint_path, epoch))
+    print("Loaded checkpoint '{}' (epoch {})".format(checkpoint_path, epoch))
     return model, optimizer, epoch, losses, kl_divs, losses_recon, best_loss
 
 
@@ -236,6 +235,10 @@ def save_checkpoint(model,
                     name="vae_3dcnn",
                     model_name=Autoencoder3DCNN
                     ):
+    if torch.cuda.is_available():
+        device = 'cuda'
+    else:
+        device = 'cpu'
     if not save:
         return
     if name == 'classifier':
@@ -260,7 +263,7 @@ def save_checkpoint(model,
                                       dilatations=dilatations,
                                       dilatations_deconv=dilatations_deconv,
                                       model_name=Autoencoder3DCNN
-                                      ).cuda()
+                                      )
     model_type = name.split("_")[0]
     if model_type == 'vae':
         if flow_type != 'o-sylvester':
@@ -305,12 +308,12 @@ def save_checkpoint(model,
                                             gated=gated,
                                             has_dense=has_dense,
                                             resblocks=resblocks,
-                                            h_last=h_last,
+                                            h_last=z_dim,
                                             n_flows=n_flows,
                                             num_elements=n_elements,
                                             auxiliary=False,
                                             a_dim=0,
-                                            model_name=Autoencoder3DCNN
+
                                             )
     elif model_type == "classif":
         model_for_saving = ConvResnet3D(maxpool,
@@ -328,7 +331,6 @@ def save_checkpoint(model,
                                         has_dense=True,
                                         resblocks=False
                                         )
-
     model_for_saving.load_state_dict(model.state_dict())
     torch.save({'model': model_for_saving,
                 'losses': losses,
@@ -336,5 +338,5 @@ def save_checkpoint(model,
                 'kl_divs': kl_divs,
                 'losses_recon': losses_recon,
                 'epoch': epoch,
-                'optimizer': optimizer.state_dict(),
+                # 'optimizer': optimizer.state_dict(),
                 'learning_rate': learning_rate}, checkpoint_path + '/' + name)
