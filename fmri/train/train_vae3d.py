@@ -388,7 +388,8 @@ class Train:
                     loss.backward()
                     # not sure if before or after
                     # torch.nn.utils.clip_grad_norm_(model.parameters(), 100)
-                    # lr_schedule.step()
+                    if scheduler == "CycleScheduler":
+                        lr_schedule.step()
 
                     try:
                         train_losses += [loss.item()]
@@ -476,8 +477,9 @@ class Train:
                 kl_divs["valid"] += [np.mean(valid_kld)]
                 losses_recon["valid"] += [np.mean(valid_recons)]
                 running_abs_error["valid"] += [np.mean(valid_abs_error)]
-                if epoch - epoch_offset > 5:
-                    lr_schedule.step(losses["valid"][-1])
+                if scheduler == "ReduceLROnPlateau":
+                    if epoch - epoch_offset > 5:
+                        lr_schedule.step(losses["valid"][-1])
                 # should be valid, but train is ok to test if it can be done without caring about
                 # generalisation
                 if (losses[self.mode][-1] < best_loss or best_loss == -1) and not np.isnan(losses[self.mode][-1]):
@@ -620,9 +622,9 @@ if __name__ == "__main__":
     best_parameters, values, experiment, model = optimize(
         parameters=[
             {"name": "warmup", "type": "choice", "values": [0, 0]},
-            {"name": "mom_range", "type": "choice", "values": [0, 0]},
+            {"name": "mom_range", "type": "range", "bounds": [0., 0.5]},
             {"name": "num_elements", "type": "range", "bounds": [1, 5]},
-            {"name": "niter", "type": "choice", "values": [10, 10]},
+            {"name": "niter", "type": "choice", "values": [10, 1000]},
             {"name": "n_res", "type": "range", "bounds": [0, 10]},
             {"name": "z_dim", "type": "range", "bounds": [200, 256]},
             {"name": "n_flows", "type": "range", "bounds": [2, 20]},
