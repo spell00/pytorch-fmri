@@ -229,10 +229,10 @@ class Autoencoder3DCNN(torch.nn.Module):
 
         self.dense1 = torch.nn.Linear(in_features=out_channels[-1], out_features=z_dim)
         self.dense2 = torch.nn.Linear(in_features=z_dim, out_features=out_channels[-1])
-        self.dense2_bn = nn.BatchNorm1d(num_features=z_dim)
-        self.dense1_bn = nn.BatchNorm1d(num_features=out_channels[-1])
-        self.dropout3d = nn.Dropout3d(0.2)
-        self.dropout = nn.Dropout(0.5)
+        self.dense1_bn = nn.BatchNorm1d(num_features=z_dim)
+        self.dense2_bn = nn.BatchNorm1d(num_features=out_channels[-1])
+        self.dropout3d = nn.Dropout3d(0.1)
+        self.dropout = nn.Dropout(0.1)
         self.maxpool = nn.MaxPool3d(maxpool, return_indices=True)
         self.maxunpool = nn.MaxUnpool3d(maxpool)
         self.conv_layers = nn.ModuleList(self.conv_layers)
@@ -319,20 +319,20 @@ class Autoencoder3DCNN(torch.nn.Module):
 
         z = x.squeeze()
         if self.has_dense:
+            z = self.dense1(z)
             if self.batchnorm:
                 if z.shape[0] != 1:
                     z = self.dense1_bn(z)
-            z = self.dense1(z)
             z = self.activation(z)
             z = self.dropout(z)
         return z
 
     def decoder(self, z):
         if self.has_dense:
+            z = self.dense2(z)
             if self.batchnorm:
                 if z.shape[0] != 1:
                     z = self.dense2_bn(z)
-            z = self.dense2(z)
             z = self.activation_deconv(z)
             z = self.dropout(z)
 
@@ -341,10 +341,10 @@ class Autoencoder3DCNN(torch.nn.Module):
         for i in range(len(self.deconv_layers)):
             if self.resblocks and i != 0:
                 for _ in range(self.n_res):
+                    x = self.resdeconv[j](x)
                     if self.batchnorm:
                         if x.shape[0] != 1:
                             x = self.bns_deconv[i - 1].to(self.device)(x)
-                    x = self.resdeconv[j](x)
                     x = self.dropout3d(x)
                     j += 1
             ind = self.indices[len(self.indices) - 1 - i]

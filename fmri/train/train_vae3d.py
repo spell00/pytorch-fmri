@@ -568,7 +568,7 @@ if __name__ == "__main__":
     paddings_deconv = [1, 1, 1, 1, 1, 1, 1]
     dilatations_deconv = [1, 1, 1, 1, 1, 1, 1]
     n_flows = 10
-    bs = 5
+    bs = 6
     maxpool = 2
     flow_type = 'nf'
     epochs_per_checkpoint = 1
@@ -581,7 +581,7 @@ if __name__ == "__main__":
     path = basedir + '32x32/'
 
     n_epochs = 10000
-    save = True
+    save = False
     training = Train(in_channels=in_channels,
                      out_channels=out_channels,
                      kernel_sizes=kernel_sizes,
@@ -614,17 +614,17 @@ if __name__ == "__main__":
             {"name": "mom_range", "type": "choice", "values": [0, 0]},
             {"name": "num_elements", "type": "range", "bounds": [1, 5]},
             {"name": "niter", "type": "choice", "values": [10, 10]},
-            {"name": "n_res", "type": "range", "bounds": [0, 20]},
+            {"name": "n_res", "type": "range", "bounds": [0, 10]},
             {"name": "z_dim", "type": "range", "bounds": [200, 256]},
             {"name": "n_flows", "type": "range", "bounds": [2, 20]},
             {"name": "scheduler", "type": "choice", "values":
                 ['ReduceLROnPlateau', 'ReduceLROnPlateau']},
-            {"name": "optimizer", "type": "choice", "values": ['adamw', 'adamw']},
+            {"name": "optimizer", "type": "choice", "values": ['rmsprop', 'rmsprop']},
             {"name": "l1", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "l2", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "momentum", "type": "range", "bounds": [0.9, 1.]},
-            {"name": "learning_rate", "type": "range", "bounds": [1e-4, 1e-3], "log_scale": True},
+            {"name": "learning_rate", "type": "range", "bounds": [1e-5, 1e-4], "log_scale": True},
         ],
         evaluation_function=training.train,
         objective_name='loss',
