@@ -145,6 +145,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                  flow_type="nf",
                  n_flows=2,
                  n_res=3,
+                 dropout_val=0.5,
                  gated=True,
                  has_dense=True,
                  resblocks=False,
@@ -231,8 +232,8 @@ class Autoencoder3DCNN(torch.nn.Module):
         self.dense2 = torch.nn.Linear(in_features=z_dim, out_features=out_channels[-1])
         self.dense1_bn = nn.BatchNorm1d(num_features=z_dim)
         self.dense2_bn = nn.BatchNorm1d(num_features=out_channels[-1])
-        self.dropout3d = nn.Dropout3d(0.1)
-        self.dropout = nn.Dropout(0.1)
+        self.dropout3d = nn.Dropout3d(dropout_val)
+        self.dropout = nn.Dropout(dropout_val)
         self.maxpool = nn.MaxPool3d(maxpool, return_indices=True)
         self.maxunpool = nn.MaxUnpool3d(maxpool)
         self.conv_layers = nn.ModuleList(self.conv_layers)

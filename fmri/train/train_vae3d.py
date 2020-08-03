@@ -21,8 +21,7 @@ import os
 
 output_directory = "checkpoints"
 import nibabel as nib
-from fmri.utils.utils import validation_split
-
+from fmri.utils.utils import validation_split, validation_spliter
 
 
 class Train:
@@ -41,7 +40,6 @@ class Train:
                  path,
                  init_func=torch.nn.init.kaiming_uniform_,
                  activation=torch.nn.GELU,
-                 num_elements=0,
                  batch_size=8,
                  epochs=1000,
                  fp16_run=False,
@@ -61,7 +59,8 @@ class Train:
                  plot_perform=True,
                  val_share=0.1,
                  mode='valid',
-                 early_stop=100
+                 early_stop=500,
+                 cv=3
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -98,12 +97,15 @@ class Train:
         self.plot_perform = plot_perform
         self.mode = mode
         self.early_stop = early_stop
+        self.cross_validation = cv
 
     def train(self, params):
         if torch.cuda.is_available():
             device = 'cuda'
         else:
             device = 'cpu'
+
+        best_losses = []
 
         num_elements = params['num_elements']
         mom_range = params['mom_range']
@@ -277,275 +279,282 @@ class Train:
             Normalize()
         ])
         all_set = MRIDataset(self.path, transform=train_transform)
-        train_set, valid_set = validation_split(all_set, val_share=self.val_share)
+        spliter = validation_spliter(all_set, cv=5)
 
-        train_loader = DataLoader(train_set,
-                                  num_workers=0,
-                                  shuffle=True,
-                                  batch_size=self.batch_size,
-                                  pin_memory=False,
-                                  drop_last=True)
-        valid_loader = DataLoader(valid_set,
-                                  num_workers=0,
-                                  shuffle=True,
-                                  batch_size=2,
-                                  pin_memory=False,
-                                  drop_last=True)
-
-        # Get shared output_directory ready
-        logger = SummaryWriter('logs')
         epoch_offset = max(1, epoch)
 
-        if scheduler == 'ReduceLROnPlateau':
-            lr_schedule = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
-                                                                     factor=0.1,
-                                                                     cooldown=50,
-                                                                     patience=200,
-                                                                     verbose=True,
-                                                                     min_lr=1e-15)
-        elif scheduler == 'CycleScheduler':
-            lr_schedule = CycleScheduler(optimizer,
-                                         learning_rate,
-                                         n_iter=niter * len(train_loader),
-                                         momentum=[
-                                             max(0.0, momentum - mom_range),
-                                             min(1.0, momentum + mom_range),
-                                         ])
-
-        losses = {
-            "train": [],
-            "valid": [],
-        }
-        kl_divs = {
-            "train": [],
-            "valid": [],
-        }
-        losses_recon = {
-            "train": [],
-            "valid": [],
-        }
-        running_abs_error = {
-            "train": [],
-            "valid": [],
-        }
-        shapes = {
-            "train": len(train_set),
-            "valid": len(valid_set),
-        }
-        early_stop_counter = 0
-
-        for epoch in range(epoch_offset, self.epochs):
-            if early_stop_counter == self.early_stop:
-                if self.verbose > 0:
-                    print('EARLY STOPPING.')
-                break
-            best_epoch = False
-            model.train()
-            train_losses = []
-            train_abs_error = []
-            train_kld = []
-            train_recons = []
-
+        for cv in range(self.cross_validation):
             # pbar = tqdm(total=len(train_loader))
-            for i, batch in enumerate(train_loader):
-                #    pbar.update(1)
-                model.zero_grad()
-                images = batch
-                images = torch.autograd.Variable(images).to(device)
-                # images = images.unsqueeze(1)
-                reconstruct, kl = model(images)
-                reconstruct = reconstruct[:, :,
-                              :images.shape[2],
-                              :images.shape[3],
-                              :images.shape[4]].squeeze(1)
-                images = images.squeeze(1)
-                loss_recon = criterion(
-                    reconstruct,
-                    images
-                ).sum() / self.batch_size
-                kl_div = torch.mean(kl)
-                loss = loss_recon + kl_div
-                l2_reg = torch.tensor(0.)
-                l1_reg = torch.tensor(0.)
-                for name, param in model.named_parameters():
-                    if 'weight' in name:
-                        l1_reg = l1 + torch.norm(param, 1)
-                for name, param in model.named_parameters():
-                    if 'weight' in name:
-                        l2_reg = l2 + torch.norm(param, 1)
-                loss += l1 * l1_reg
-                loss += l2 * l2_reg
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), 1e-8)
-                loss.backward()
-                # not sure if before or after
-                # torch.nn.utils.clip_grad_norm_(model.parameters(), 100)
-                # lr_schedule.step()
 
-                try:
-                    train_losses += [loss.item()]
-                except:
-                    return best_loss
-                train_kld += [kl_div.item()]
-                train_recons += [loss_recon.item()]
-                train_abs_error += [
-                    float(torch.mean(torch.abs_(
-                        reconstruct - images.to(device)
-                    )).item())
-                ]
+            valid_set, train_set = spliter.__next__()
 
-                # if self.fp16_run:
-                #    with amp.scale_loss(loss, optimizer) as scaled_loss:
-                #        scaled_loss.backward()
-                #    del scaled_loss
-                # else:
-                optimizer.step()
-                logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
-                del kl, loss_recon, kl_div, loss
+            train_loader = DataLoader(train_set,
+                                      num_workers=0,
+                                      shuffle=True,
+                                      batch_size=self.batch_size,
+                                      pin_memory=False,
+                                      drop_last=True)
+            valid_loader = DataLoader(valid_set,
+                                      num_workers=0,
+                                      shuffle=True,
+                                      batch_size=2,
+                                      pin_memory=False,
+                                      drop_last=True)
 
-            img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
-            recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
-            # if 'views' not in os.listdir():
-            #     os.mkdir('views')
-            # img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
-            # recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
+            # Get shared output_directory ready
+            logger = SummaryWriter('logs')
 
-            losses["train"] += [np.mean(train_losses)]
-            kl_divs["train"] += [np.mean(train_kld)]
-            losses_recon["train"] += [np.mean(train_recons)]
-            running_abs_error["train"] += [np.mean(train_abs_error)]
+            if scheduler == 'ReduceLROnPlateau':
+                lr_schedule = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
+                                                                         factor=0.1,
+                                                                         cooldown=50,
+                                                                         patience=200,
+                                                                         verbose=True,
+                                                                         min_lr=1e-15)
+            elif scheduler == 'CycleScheduler':
+                lr_schedule = CycleScheduler(optimizer,
+                                             learning_rate,
+                                             n_iter=niter * len(train_loader),
+                                             momentum=[
+                                                 max(0.0, momentum - mom_range),
+                                                 min(1.0, momentum + mom_range),
+                                             ])
 
-            if epoch % self.epochs_per_print == 0:
-                if self.verbose > 1:
-                    print("Epoch: {}:\t"
-                          "Train Loss: {:.5f} , "
-                          "kld: {:.3f} , "
-                          "recon: {:.3f}"
-                          .format(epoch,
-                                  losses["train"][-1],
-                                  kl_divs["train"][-1],
-                                  losses_recon["train"][-1])
-                          )
+            losses = {
+                "train": [],
+                "valid": [],
+            }
+            kl_divs = {
+                "train": [],
+                "valid": [],
+            }
+            losses_recon = {
+                "train": [],
+                "valid": [],
+            }
+            running_abs_error = {
+                "train": [],
+                "valid": [],
+            }
+            shapes = {
+                "train": len(train_set),
+                "valid": len(valid_set),
+            }
+            early_stop_counter = 0
+            print("\n\n\nCV:", cv, "/", self.cross_validation, "\nTrain samples:", len(train_set),
+                  "\nValid samples:", len(valid_set), "\n\n\n")
 
-            if np.isnan(losses["train"][-1]):
-                if self.verbose > 0:
-                    print('PREMATURE RETURN...')
-                return best_loss
-            model.eval()
-            valid_losses = []
-            valid_kld = []
-            valid_recons = []
-            valid_abs_error = []
-            # pbar = tqdm(total=len(valid_loader))
-            for i, batch in enumerate(valid_loader):
-                #    pbar.update(1)
-                images = batch
-                images = images.to(device)
-                # images = images.unsqueeze(1)
-                reconstruct, kl = model(images)
-                reconstruct = reconstruct[:, :,
-                              :images.shape[2],
-                              :images.shape[3],
-                              :images.shape[4]].squeeze(1)
-                images = images.squeeze(1)
-                loss_recon = criterion(
-                    reconstruct,
-                    images.to(device)
-                ).sum()
-                kl_div = torch.mean(kl)
-                if epoch < warmup:
-                    kl_div = kl_div * (epoch / warmup)
-                loss = loss_recon + kl_div
-                try:
-                    valid_losses += [loss.item()]
-                except:
-                    return best_loss
-                valid_kld += [kl_div.item()]
-                valid_recons += [loss_recon.item()]
-                valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.to(device))).item())]
-                logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
-            losses["valid"] += [np.mean(valid_losses)]
-            kl_divs["valid"] += [np.mean(valid_kld)]
-            losses_recon["valid"] += [np.mean(valid_recons)]
-            running_abs_error["valid"] += [np.mean(valid_abs_error)]
-            if epoch - epoch_offset > 5:
-                lr_schedule.step(losses["valid"][-1])
-            # should be valid, but train is ok to test if it can be done without caring about
-            # generalisation
-            if (losses[self.mode][-1] < best_loss or best_loss == -1) and not np.isnan(losses[self.mode][-1]):
-                if self.verbose > 1:
-                    print('BEST EPOCH!', losses[self.mode][-1])
-                early_stop_counter = 0
-                best_loss = losses[self.mode][-1]
-                best_epoch = True
-            else:
-                early_stop_counter += 1
+            for epoch in range(epoch_offset, self.epochs):
+                if early_stop_counter == self.early_stop:
+                    if self.verbose > 0:
+                        print('EARLY STOPPING.')
+                    break
+                best_epoch = False
+                model.train()
+                train_losses = []
+                train_abs_error = []
+                train_kld = []
+                train_recons = []
 
-            if epoch % self.epochs_per_checkpoint == 0:
-                # img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
-                # recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
+                for i, batch in enumerate(train_loader):
+                    #    pbar.update(1)
+                    model.zero_grad()
+                    images = batch
+                    images = torch.autograd.Variable(images).to(device)
+                    # images = images.unsqueeze(1)
+                    reconstruct, kl = model(images)
+                    reconstruct = reconstruct[:, :,
+                                  :images.shape[2],
+                                  :images.shape[3],
+                                  :images.shape[4]].squeeze(1)
+                    images = images.squeeze(1)
+                    loss_recon = criterion(
+                        reconstruct,
+                        images
+                    ).sum() / self.batch_size
+                    kl_div = torch.mean(kl)
+                    loss = loss_recon + kl_div
+                    l2_reg = torch.tensor(0.)
+                    l1_reg = torch.tensor(0.)
+                    for name, param in model.named_parameters():
+                        if 'weight' in name:
+                            l1_reg = l1 + torch.norm(param, 1)
+                    for name, param in model.named_parameters():
+                        if 'weight' in name:
+                            l2_reg = l2 + torch.norm(param, 1)
+                    loss += l1 * l1_reg
+                    loss += l2 * l2_reg
+                    # torch.nn.utils.clip_grad_norm_(model.parameters(), 1e-8)
+                    loss.backward()
+                    # not sure if before or after
+                    # torch.nn.utils.clip_grad_norm_(model.parameters(), 100)
+                    # lr_schedule.step()
+
+                    try:
+                        train_losses += [loss.item()]
+                    except:
+                        return best_loss
+                    train_kld += [kl_div.item()]
+                    train_recons += [loss_recon.item()]
+                    train_abs_error += [
+                        float(torch.mean(torch.abs_(
+                            reconstruct - images.to(device)
+                        )).item())
+                    ]
+
+                    # if self.fp16_run:
+                    #    with amp.scale_loss(loss, optimizer) as scaled_loss:
+                    #        scaled_loss.backward()
+                    #    del scaled_loss
+                    # else:
+                    optimizer.step()
+                    logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
+                    del kl, loss_recon, kl_div, loss
+
+                img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
+                recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
                 # if 'views' not in os.listdir():
                 #     os.mkdir('views')
-                # img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
-                # recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
-                if best_epoch and self.save:
+                # img.to_filename(filename='views/image_train_' + str(epoch) + '.nii.gz')
+                # recon.to_filename(filename='views/reconstruct_train_' + str(epoch) + '.nii.gz')
+
+                losses["train"] += [np.mean(train_losses)]
+                kl_divs["train"] += [np.mean(train_kld)]
+                losses_recon["train"] += [np.mean(train_recons)]
+                running_abs_error["train"] += [np.mean(train_abs_error)]
+
+                if epoch % self.epochs_per_print == 0:
                     if self.verbose > 1:
-                        print('Saving model...')
-                    save_checkpoint(model=model,
-                                    optimizer=optimizer,
-                                    maxpool=maxpool,
-                                    padding=self.padding,
-                                    padding_deconv=self.padding_deconv,
-                                    learning_rate=learning_rate,
-                                    epoch=epoch,
-                                    checkpoint_path=output_directory,
-                                    z_dim=z_dim,
-                                    gated=self.gated,
-                                    batchnorm=self.batchnorm,
-                                    losses=losses,
-                                    kl_divs=kl_divs,
-                                    losses_recon=losses_recon,
-                                    in_channels=self.in_channels,
-                                    out_channels=self.out_channels,
-                                    kernel_sizes=self.kernel_sizes,
-                                    kernel_sizes_deconv=self.kernel_sizes_deconv,
-                                    strides=self.strides,
-                                    strides_deconv=self.strides_deconv,
-                                    dilatations=self.dilatations,
-                                    dilatations_deconv=self.dilatations_deconv,
-                                    best_loss=best_loss,
-                                    save=self.save,
-                                    name=self.modelname,
-                                    n_flows=n_flows,
-                                    flow_type=self.flow_type,
-                                    n_res=n_res,
-                                    resblocks=resblocks,
-                                    h_last=z_dim,
-                                    n_elements=num_elements,
-                                    )
-            if epoch % self.epochs_per_print == 0:
-                if self.verbose > 0:
-                    print("Epoch: {}:\t"
-                          "Valid Loss: {:.5f} , "
-                          "kld: {:.3f} , "
-                          "recon: {:.3f}"
-                          .format(epoch,
-                                  losses["valid"][-1],
-                                  kl_divs["valid"][-1],
-                                  losses_recon["valid"][-1]
-                                  )
-                          )
-                if self.verbose > 1:
-                    print("Current LR:", optimizer.param_groups[0]['lr'])
-                if 'momentum' in optimizer.param_groups[0].keys():
-                    print("Current Momentum:", optimizer.param_groups[0]['momentum'])
-            if self.plot_perform:
-                plot_performance(loss_total=losses, losses_recon=losses_recon, kl_divs=kl_divs, shapes=shapes,
-                             results_path="../figures",
-                             filename="training_loss_trace_"
-                                      + self.modelname + '.jpg')
-        if self.verbose > 0:
-            print('BEST LOSS :', best_loss)
-        return best_loss
+                        print("Epoch: {}:\t"
+                              "Train Loss: {:.5f} , "
+                              "kld: {:.3f} , "
+                              "recon: {:.3f}"
+                              .format(epoch,
+                                      losses["train"][-1],
+                                      kl_divs["train"][-1],
+                                      losses_recon["train"][-1])
+                              )
+
+                if np.isnan(losses["train"][-1]):
+                    if self.verbose > 0:
+                        print('PREMATURE RETURN...')
+                    return best_loss
+                model.eval()
+                valid_losses = []
+                valid_kld = []
+                valid_recons = []
+                valid_abs_error = []
+                # pbar = tqdm(total=len(valid_loader))
+                for i, batch in enumerate(valid_loader):
+                    #    pbar.update(1)
+                    images = batch
+                    images = images.to(device)
+                    # images = images.unsqueeze(1)
+                    reconstruct, kl = model(images)
+                    reconstruct = reconstruct[:, :,
+                                  :images.shape[2],
+                                  :images.shape[3],
+                                  :images.shape[4]].squeeze(1)
+                    images = images.squeeze(1)
+                    loss_recon = criterion(
+                        reconstruct,
+                        images.to(device)
+                    ).sum()
+                    kl_div = torch.mean(kl)
+                    if epoch < warmup:
+                        kl_div = kl_div * (epoch / warmup)
+                    loss = loss_recon + kl_div
+                    try:
+                        valid_losses += [loss.item()]
+                    except:
+                        return best_loss
+                    valid_kld += [kl_div.item()]
+                    valid_recons += [loss_recon.item()]
+                    valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.to(device))).item())]
+                    logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
+                losses["valid"] += [np.mean(valid_losses)]
+                kl_divs["valid"] += [np.mean(valid_kld)]
+                losses_recon["valid"] += [np.mean(valid_recons)]
+                running_abs_error["valid"] += [np.mean(valid_abs_error)]
+                if epoch - epoch_offset > 5:
+                    lr_schedule.step(losses["valid"][-1])
+                # should be valid, but train is ok to test if it can be done without caring about
+                # generalisation
+                if (losses[self.mode][-1] < best_loss or best_loss == -1) and not np.isnan(losses[self.mode][-1]):
+                    if self.verbose > 1:
+                        print('BEST EPOCH!', losses[self.mode][-1])
+                    early_stop_counter = 0
+                    best_loss = losses[self.mode][-1]
+                    best_epoch = True
+                else:
+                    early_stop_counter += 1
+
+                if epoch % self.epochs_per_checkpoint == 0:
+                    # img = nib.Nifti1Image(images.detach().cpu().numpy()[0], np.eye(4))
+                    # recon = nib.Nifti1Image(reconstruct.detach().cpu().numpy()[0], np.eye(4))
+                    # if 'views' not in os.listdir():
+                    #     os.mkdir('views')
+                    # img.to_filename(filename='views/image_' + str(epoch) + '.nii.gz')
+                    # recon.to_filename(filename='views/reconstruct_' + str(epoch) + '.nii.gz')
+                    if best_epoch and self.save:
+                        if self.verbose > 1:
+                            print('Saving model...')
+                        save_checkpoint(model=model,
+                                        optimizer=optimizer,
+                                        maxpool=maxpool,
+                                        padding=self.padding,
+                                        padding_deconv=self.padding_deconv,
+                                        learning_rate=learning_rate,
+                                        epoch=epoch,
+                                        checkpoint_path=output_directory,
+                                        z_dim=z_dim,
+                                        gated=self.gated,
+                                        batchnorm=self.batchnorm,
+                                        losses=losses,
+                                        kl_divs=kl_divs,
+                                        losses_recon=losses_recon,
+                                        in_channels=self.in_channels,
+                                        out_channels=self.out_channels,
+                                        kernel_sizes=self.kernel_sizes,
+                                        kernel_sizes_deconv=self.kernel_sizes_deconv,
+                                        strides=self.strides,
+                                        strides_deconv=self.strides_deconv,
+                                        dilatations=self.dilatations,
+                                        dilatations_deconv=self.dilatations_deconv,
+                                        best_loss=best_loss,
+                                        save=self.save,
+                                        name=self.modelname,
+                                        n_flows=n_flows,
+                                        flow_type=self.flow_type,
+                                        n_res=n_res,
+                                        resblocks=resblocks,
+                                        h_last=z_dim,
+                                        n_elements=num_elements,
+                                        )
+                if epoch % self.epochs_per_print == 0:
+                    if self.verbose > 0:
+                        print("Epoch: {}:\t"
+                              "Valid Loss: {:.5f} , "
+                              "kld: {:.3f} , "
+                              "recon: {:.3f}"
+                              .format(epoch,
+                                      losses["valid"][-1],
+                                      kl_divs["valid"][-1],
+                                      losses_recon["valid"][-1]
+                                      )
+                              )
+                    if self.verbose > 1:
+                        print("Current LR:", optimizer.param_groups[0]['lr'])
+                    if 'momentum' in optimizer.param_groups[0].keys():
+                        print("Current Momentum:", optimizer.param_groups[0]['momentum'])
+                if self.plot_perform:
+                    plot_performance(loss_total=losses, losses_recon=losses_recon, kl_divs=kl_divs, shapes=shapes,
+                                     results_path="../figures",
+                                     filename="training_loss_trace_"
+                                              + self.modelname + '.jpg')
+            if self.verbose > 0:
+                print('BEST LOSS :', best_loss)
+            best_losses += [best_loss]
 
 
 if __name__ == "__main__":
@@ -556,21 +565,21 @@ if __name__ == "__main__":
 
     size = 32
     z_dim = 50
-    in_channels = [1, 64, 128, 128, 128, 256, 256]
-    out_channels = [64, 128, 128, 128, 256, 256, 256]
-    kernel_sizes = [3, 3, 3, 3, 3, 3, 3]
-    kernel_sizes_deconv = [3, 3, 3, 3, 3, 3, 3]
-    strides = [1, 1, 1, 1, 1, 1, 1]
-    strides_deconv = [1, 1, 1, 1, 1, 1, 1]
-    dilatations = [1, 1, 1, 1, 1, 1, 1]
-    dilatations_Deconv = [1, 1, 1, 1, 1, 1, 1]
-    paddings = [2, 2, 2, 2, 2, 2, 1]
-    paddings_deconv = [1, 1, 1, 1, 1, 1, 1]
-    dilatations_deconv = [1, 1, 1, 1, 1, 1, 1]
+    in_channels = [1, 128, 128, 256, 256]
+    out_channels = [128, 128, 256, 256, 256]
+    kernel_sizes = [3, 3, 3, 3, 3]
+    kernel_sizes_deconv = [3, 3, 3, 3, 3]
+    strides = [1, 1, 1, 1, 1]
+    strides_deconv = [1, 1, 1, 1, 1]
+    dilatations = [1, 1, 1, 1, 1]
+    dilatations_Deconv = [1, 1, 1, 1, 1, 1]
+    paddings = [1, 1, 1, 1, 1]
+    paddings_deconv = [1, 1, 1, 1, 1]
+    dilatations_deconv = [1, 1, 1, 1, 1]
     n_flows = 10
     bs = 6
     maxpool = 2
-    flow_type = 'nf'
+    flow_type = 'hf'
     epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True
