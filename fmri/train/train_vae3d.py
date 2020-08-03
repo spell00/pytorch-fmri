@@ -391,10 +391,7 @@ class Train:
                     if scheduler == "CycleScheduler":
                         lr_schedule.step()
 
-                    try:
-                        train_losses += [loss.item()]
-                    except:
-                        return best_loss
+                    train_losses += [loss.item()]
                     train_kld += [kl_div.item()]
                     train_recons += [loss_recon.item()]
                     train_abs_error += [
@@ -465,10 +462,7 @@ class Train:
                     if epoch < warmup:
                         kl_div = kl_div * (epoch / warmup)
                     loss = loss_recon + kl_div
-                    try:
-                        valid_losses += [loss.item()]
-                    except:
-                        return best_loss
+                    valid_losses += [loss.item()]
                     valid_kld += [kl_div.item()]
                     valid_recons += [loss_recon.item()]
                     valid_abs_error += [float(torch.mean(torch.abs_(reconstruct - images.to(device))).item())]
