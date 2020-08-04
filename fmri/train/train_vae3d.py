@@ -295,7 +295,7 @@ class Train:
 
         for cv in range(self.cross_validation):
             # pbar = tqdm(total=len(train_loader))
-
+            model.random_init()
             valid_set, train_set = spliter.__next__()
 
             train_loader = DataLoader(train_set,
@@ -583,7 +583,7 @@ if __name__ == "__main__":
     basedir = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
     path = basedir + '32x32/'
 
-    n_epochs = 10000
+    n_epochs = 100
     save = True
     training = Train(in_channels=in_channels,
                      out_channels=out_channels,
