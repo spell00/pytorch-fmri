@@ -393,6 +393,7 @@ class Train:
                     loss.backward()
                     if scheduler == "CycleScheduler":
                         lr_schedule.step()
+                        optimizer = lr_schedule.optimizer
 
                     train_losses += [loss.item()]
                     train_kld += [kl_div.item()]
