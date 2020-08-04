@@ -45,7 +45,7 @@ class Train:
                  fp16_run=False,
                  checkpoint_path=None,
                  epochs_per_checkpoint=1,
-                 epochs_per_print=10,
+                 epochs_per_print=1,
                  gated=True,
                  has_dense=True,
                  batchnorm=False,
@@ -391,9 +391,6 @@ class Train:
                     loss += l1 * l1_reg
                     loss += l2 * l2_reg
                     loss.backward()
-                    if scheduler == "CycleScheduler":
-                        lr_schedule.step()
-                        optimizer = lr_schedule.optimizer
 
                     train_losses += [loss.item()]
                     train_kld += [kl_div.item()]
@@ -405,6 +402,9 @@ class Train:
                     ]
 
                     optimizer.step()
+                    if scheduler == "CycleScheduler":
+                        lr_schedule.step()
+                        # optimizer = lr_schedule.optimizer
                     logger.add_scalar('training_loss', loss.item(), i + len(train_loader) * epoch)
                     del kl, loss_recon, kl_div, loss
 
@@ -618,7 +618,7 @@ if __name__ == "__main__":
             {"name": "warmup", "type": "choice", "values": [0, 0]},
             {"name": "mom_range", "type": "range", "bounds": [0., 0.1]},
             {"name": "num_elements", "type": "range", "bounds": [1, 5]},
-            {"name": "niter", "type": "choice", "values": [10, 10]},
+            {"name": "niter", "type": "choice", "values": [100, 1000]},
             {"name": "n_res", "type": "range", "bounds": [1, 20]},
             {"name": "z_dim", "type": "range", "bounds": [200, 256]},
             {"name": "n_flows", "type": "range", "bounds": [2, 10]},
