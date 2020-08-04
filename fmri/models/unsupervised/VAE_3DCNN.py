@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from ..utils.distributions import log_gaussian, log_standard_gaussian
 from ..utils.flow import NormalizingFlows, IAF, HouseholderFlow, ccLinIAF, SylvesterFlows
 from ..utils.masked_layer import GatedConv3d, GatedConvTranspose3d
-from fmri.utils.unsupervised.quantizer import Quantize
+from fmri.utils.quantizer import Quantize
 in_channels = None
 out_channels = None
 kernel_sizes = None

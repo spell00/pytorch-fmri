@@ -598,7 +598,7 @@ if __name__ == "__main__":
     basedir = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
     path = basedir + '32x32/'
 
-    n_epochs = 10
+    n_epochs = 1000
     save = True
     training = Train(in_channels=in_channels,
                      out_channels=out_channels,
