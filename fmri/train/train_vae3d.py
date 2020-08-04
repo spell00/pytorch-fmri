@@ -296,6 +296,7 @@ class Train:
         for cv in range(self.cross_validation):
             # pbar = tqdm(total=len(train_loader))
             model.random_init()
+            best_loss = -1
             valid_set, train_set = spliter.__next__()
 
             train_loader = DataLoader(train_set,
@@ -310,6 +311,24 @@ class Train:
                                       batch_size=2,
                                       pin_memory=False,
                                       drop_last=True)
+
+            if optimizer_type == 'adamw':
+                optimizer = torch.optim.AdamW(params=model.parameters(),
+                                              lr=learning_rate,
+                                              weight_decay=weight_decay,
+                                              amsgrad=True)
+            elif optimizer_type == 'sgd':
+                optimizer = torch.optim.SGD(params=model.parameters(),
+                                            lr=learning_rate,
+                                            weight_decay=weight_decay,
+                                            momentum=momentum)
+            elif optimizer_type == 'rmsprop':
+                optimizer = torch.optim.RMSprop(params=model.parameters(),
+                                                lr=learning_rate,
+                                                weight_decay=weight_decay,
+                                                momentum=momentum)
+            else:
+                exit('error: no such optimizer type available')
 
             # Get shared output_directory ready
             logger = SummaryWriter('logs')
@@ -435,10 +454,6 @@ class Train:
                                       losses_recon["train"][-1])
                               )
 
-                if np.isnan(losses["train"][-1]):
-                    if self.verbose > 0:
-                        print('PREMATURE RETURN...')
-                    return best_loss
                 model.eval()
                 valid_losses = []
                 valid_kld = []
@@ -583,7 +598,7 @@ if __name__ == "__main__":
     basedir = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
     path = basedir + '32x32/'
 
-    n_epochs = 100
+    n_epochs = 10
     save = True
     training = Train(in_channels=in_channels,
                      out_channels=out_channels,
