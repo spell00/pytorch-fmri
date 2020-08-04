@@ -45,7 +45,7 @@ class Train:
                  fp16_run=False,
                  checkpoint_path=None,
                  epochs_per_checkpoint=1,
-                 epochs_per_print=1,
+                 epochs_per_print=100,
                  gated=True,
                  has_dense=True,
                  batchnorm=False,
@@ -62,6 +62,7 @@ class Train:
                  early_stop=500,
                  cv=3,
                  load=False,
+                 n_embed=2048
                  ):
         super().__init__()
         self.in_channels = in_channels
@@ -100,6 +101,7 @@ class Train:
         self.mode = mode
         self.early_stop = early_stop
         self.cross_validation = cv
+        self.n_embed = n_embed
         self.model_name = ''
 
     def train(self, params):
@@ -571,7 +573,7 @@ if __name__ == "__main__":
     n_flows = 10
     bs = 3
     maxpool = 2
-    flow_type = 'o-sylvester'
+    flow_type = 'quantizer'
     epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True

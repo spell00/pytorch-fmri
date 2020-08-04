@@ -4,9 +4,9 @@ from torch.autograd import Variable
 import torch.nn as nn
 import torch.nn.functional as F
 from ..utils.distributions import log_gaussian, log_standard_gaussian
-from ..utils.flow import NormalizingFlows, IAF, HouseholderFlow, ccLinIAF, SylvesterFlows, TriangularSylvester
+from ..utils.flow import NormalizingFlows, IAF, HouseholderFlow, ccLinIAF, SylvesterFlows
 from ..utils.masked_layer import GatedConv3d, GatedConvTranspose3d
-
+from fmri.utils.unsupervised.quantizer import Quantize
 in_channels = None
 out_channels = None
 kernel_sizes = None
@@ -145,6 +145,7 @@ class Autoencoder3DCNN(torch.nn.Module):
                  flow_type="nf",
                  n_flows=2,
                  n_res=3,
+                 n_embed=2000,
                  dropout_val=0.5,
                  gated=True,
                  has_dense=True,
@@ -157,6 +158,7 @@ class Autoencoder3DCNN(torch.nn.Module):
         else:
             device = 'cpu'
 
+        self.n_embed = n_embed
         self.device = device
         self.conv_layers = []
         self.deconv_layers = []
@@ -254,6 +256,8 @@ class Autoencoder3DCNN(torch.nn.Module):
             self.flow = ccLinIAF(in_features=[z_dim], auxiliary=False, n_flows=n_flows, h_last_dim=z_dim)
         if self.flow_type == "o-sylvester":
             self.flow = SylvesterFlows(in_features=[z_dim], flow_flavour='o-sylvester', n_flows=1, h_last_dim=None)
+        if self.flow_type == "quantizer":
+            self.flow = Quantize(z_dim, self.n_embed)
 
     def random_init(self, init_func=torch.nn.init.kaiming_uniform_):
 
