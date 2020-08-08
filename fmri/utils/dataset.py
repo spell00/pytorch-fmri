@@ -7,7 +7,8 @@ import nibabel as nib
 from fmri.models.supervised.resnetcnn3d import ConvResnet3D
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
 from fmri.models.unsupervised.SylvesterVAE3DCNN import SylvesterVAE
-
+import random
+random.seed(42)
 
 def _resize_data(data, new_size=(160, 160, 160)):
     initial_size_x = data.shape[0]
@@ -62,6 +63,7 @@ class MRIDataset(Dataset):
         self.device = device
         self.size = size
         self.samples = os.listdir(path)
+        random.shuffle(self.samples)
         self.transform = transform
 
     def __len__(self):
@@ -85,6 +87,7 @@ class MRIDatasetClassifier(Dataset):
         self.device = device
         self.size = size
         self.names = os.listdir(path)
+        random.shuffle(self.names)
         self.samples = []
         self.targets = []
         for i, name in enumerate(self.names):
@@ -92,6 +95,10 @@ class MRIDatasetClassifier(Dataset):
             # self.samples.extend(samples)
             self.targets.extend([i for _ in range(len(samples))])
             self.samples.extend([path + '/' + name + '/' + str(size) + 'x' + str(size) + "/" + s for s in samples])
+        indices = [i for i in range(len(self.targets))]
+        random.shuffle(indices)
+        self.samples = [self.samples[ind] for ind in indices]
+        self.targets = [self.targets[ind] for ind in indices]
         self.transform = transform
 
     def __len__(self):

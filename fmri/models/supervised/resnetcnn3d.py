@@ -5,7 +5,7 @@ import torch
 from ..utils.masked_layer import GatedConv3d
 
 
-def random_init(m, init_func=torch.nn.init.kaiming_uniform_):
+def random_init(m, init_func=torch.nn.init.xavier_uniform_):
     if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
         init_func(m.weight.data)
         if m.bias is not None:
@@ -26,7 +26,7 @@ class ResBlock3D(nn.Module):
         self.conv.apply(random_init)
 
     def forward(self, input):
-        out = self.conv.to(self.device)(input)
+        out = self.conv(input)
         out += input
 
         return out
@@ -45,7 +45,7 @@ class ResBlockDeconv3D(nn.Module):
         self.conv.apply(random_init)
 
     def forward(self, input):
-        out = self.conv.to(self.device)(input)
+        out = self.conv(input)
         out += input
 
         return out
@@ -116,12 +116,15 @@ class ConvResnet3D(nn.Module):
                 for _ in range(n_res):
                     self.resconv += [ResBlock3D(ins, outs, activation, device)]
             self.bns += [nn.BatchNorm3d(num_features=outs)]
-            self.dropout += [nn.Dropout3d(0.5)]
+        self.dropout3d = nn.Dropout3d(0.5)
         self.dense1 = torch.nn.Linear(in_features=out_channels[-1], out_features=n_classes)
-        self.dense1_bn = nn.BatchNorm1d(num_features=n_classes)
-        self.dense1_dropout = nn.Dropout(0.5)
+        self.dense2 = torch.nn.Linear(in_features=32, out_features=n_classes)
+        self.dense1_bn = nn.BatchNorm1d(num_features=32)
+        self.dense2_bn = nn.BatchNorm1d(num_features=n_classes)
+        self.dropout = nn.Dropout(0.5)
+        self.log_softmax = torch.nn.functional.log_softmax
 
-    def random_init(self, init_method=nn.init.xavier_normal_):
+    def random_init(self, init_method=nn.init.xavier_uniform_):
         print("Random init")
         for m in self.modules():
             if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
@@ -134,28 +137,33 @@ class ConvResnet3D(nn.Module):
         for i in range(len(self.conv_layers)):
             if self.resblocks and i != 0:
                 for _ in range(self.n_res):
+                    x = self.resconv[j](x)
                     if self.batchnorm:
                         if x.shape[0] != 1:
-                            x = self.bns[i - 1].to(self.device)(x)
-                    x = self.resconv[j](x)
+                            x = self.bns[i - 1](x)
+                    x = self.dropout3d(x)
                     j += 1
             x = self.conv_layers[i](x)
             if self.batchnorm:
                 if x.shape[0] != 1:
-                    x = self.bns[i].to(self.device)(x)
+                    x = self.bns[i](x)
+            x = self.dropout3d(x)
             x = self.activation(x)
-            x = self.dropout[i](x)
             x = self.maxpool(x)
 
         z = x.squeeze()
-        if self.has_dense:
-            z = self.dense1(z)
-            z = self.activation(z)
-            if self.batchnorm:
-                if z.shape[0] != 1:
-                    z = self.dense1_bn(z)
-            z = self.dense1_dropout(z)
-        z = torch.softmax(z, 1)
+        z = self.dense1(z)
+        #if self.batchnorm:
+        #    if z.shape[0] != 1:
+        #        z = self.dense1_bn(z)
+        #z = self.activation(z)
+        #z = self.dropout(z)
+        #z = self.dense2(z)
+        # if self.batchnorm:
+        #     if z.shape[0] != 1:
+        #         z = self.dense2_bn(z)
+        # z = self.dropout(z)
+        # z = self.log_softmax(z, 1)
         return z
 
     def get_parameters(self):

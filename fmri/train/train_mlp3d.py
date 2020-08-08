@@ -10,8 +10,8 @@ from fmri.utils.activations import Swish, Mish
 from fmri.utils.CycleAnnealScheduler import CycleScheduler
 from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDatasetClassifier
 from fmri.utils.transform_3d import Normalize, RandomRotation3D, ColorJitter3D, Flip90, Flip180, Flip270, XFlip, YFlip, \
-    ZFlip, RandomAffine3D
-from fmri.models.supervised.resnetcnn3d import ConvResnet3D
+    ZFlip
+from fmri.models.supervised.MLP import MLP
 from fmri.utils.plot_performance import plot_performance
 import torchvision
 from torchvision import transforms
@@ -32,28 +32,18 @@ else:
 
 class Train:
     def __init__(self,
-                 in_channels,
-                 out_channels,
-                 kernel_sizes,
-                 strides,
-                 dilatations,
+                 n_neurons,
                  save,
-                 padding,
                  path,
                  n_classes,
                  init_func=torch.nn.init.kaiming_uniform_,
                  activation=torch.nn.GELU,
                  batch_size=8,
                  epochs=1000,
-                 fp16_run=False,
                  checkpoint_path=None,
                  epochs_per_checkpoint=1,
                  epochs_per_print=1,
-                 gated=True,
-                 has_dense=True,
                  batchnorm=False,
-                 resblocks=False,
-                 maxpool=3,
                  verbose=2,
                  size=32,
                  mean=0.5,
@@ -63,24 +53,14 @@ class Train:
                  cross_validation=5
                  ):
         super().__init__()
+        self.n_neurons = n_neurons
         self.n_classes = n_classes
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.kernel_sizes = kernel_sizes
-        self.strides = strides
-        self.dilatations = dilatations
-        self.padding = padding
         self.batch_size = batch_size
         self.epochs = epochs
-        self.fp16_run = fp16_run
         self.checkpoint_path = checkpoint_path
         self.epochs_per_checkpoint = epochs_per_checkpoint
         self.epochs_per_print = epochs_per_print
-        self.gated = gated
-        self.has_dense = has_dense
         self.batchnorm = batchnorm
-        self.resblocks = resblocks
-        self.maxpool = maxpool
         self.save = save
         self.verbose = verbose
         self.path = path
@@ -130,26 +110,12 @@ class Train:
                          + '_momentum' + str(momentum) \
                          + '_' + str(optimizer_type) \
                          + "_nclasses" + str(self.n_classes) \
-                         + '_gated' + str(self.gated) \
-                         + '_resblocks' + str(self.resblocks) \
                          + '_initlr' + learning_rate.__format__('e') \
                          + '_wd' + weight_decay.__format__('e') \
                          + '_size' + str(self.size)
-        model = ConvResnet3D(self.maxpool,
-                             self.in_channels,
-                             self.out_channels,
-                             self.kernel_sizes,
-                             self.strides,
-                             self.dilatations,
-                             self.padding,
-                             self.batchnorm,
-                             self.n_classes,
-                             activation=torch.nn.ReLU,
-                             n_res=n_res,
-                             gated=self.gated,
-                             has_dense=self.has_dense,
-                             resblocks=self.resblocks,
-                             ).to(device)
+        model = MLP(n_neurons=n_neurons,
+                    n_classes=self.n_classes,
+                    activation=torch.nn.ReLU).to(device)
         criterion = nn.CrossEntropyLoss()
         if optimizer_type == 'adamw':
             optimizer = torch.optim.AdamW(params=model.parameters(),
@@ -168,46 +134,9 @@ class Train:
                                             momentum=momentum)
         else:
             exit('error: no such optimizer type available')
-        # if self.fp16_run:
-        #     from apex import amp
-        #    model, optimizer = amp.initialize(model, optimizer, opt_level='O2')
 
-        # Load checkpoint if one exists
         epoch = 0
-        best_loss = -1
-        if self.checkpoint_path is not None and self.save:
-            model, optimizer, \
-            epoch, losses, \
-            kl_divs, losses_recon, \
-            best_loss = load_checkpoint(checkpoint_path,
-                                        model,
-                                        self.maxpool,
-                                        save=self.save,
-                                        padding=self.padding,
-                                        has_dense=self.has_dense,
-                                        batchnorm=self.batchnorm,
-                                        flow_type=None,
-                                        padding_deconv=None,
-                                        optimizer=optimizer,
-                                        z_dim=self.n_classes,
-                                        gated=self.gated,
-                                        in_channels=self.in_channels,
-                                        out_channels=self.out_channels,
-                                        kernel_sizes=self.kernel_sizes,
-                                        kernel_sizes_deconv=None,
-                                        strides=self.strides,
-                                        strides_deconv=None,
-                                        dilatations=self.dilatations,
-                                        dilatations_deconv=None,
-                                        name=self.modelname,
-                                        n_res=n_res,
-                                        resblocks=resblocks,
-                                        h_last=None,
-                                        n_elements=None
-                                        )
         model = model.to(device)
-        # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
-        # targets = torch.Tensor([0 for _ in t1])
 
         train_transform = transforms.Compose([
             transforms.RandomChoice([
@@ -220,14 +149,7 @@ class Train:
                 Flip180(),
                 Flip270()
             ]),
-            ColorJitter3D(.1, .1, .1, .1),
-            #transforms.RandomChoice(
-            #    [
-            #        RandomAffine3D(0, [.1, .1], [.1, .1], [.1, .1]),
-            #        RandomAffine3D(1, [.1, .1], [.1, .1], [.1, .1]),
-            #        RandomAffine3D(2, [.1, .1], [.1, .1], [.1, .1])
-            #    ]
-            #),
+            ColorJitter3D(.2, .2, .2, .2),
             transforms.RandomChoice(
                 [
                     RandomRotation3D(25, 0),
@@ -239,8 +161,6 @@ class Train:
             torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
             Normalize()
         ])
-        """
-        """
         all_set = MRIDatasetClassifier(self.path, transform=train_transform, size=self.size)
         spliter = validation_spliter(all_set, cv=self.cross_validation)
 
@@ -270,8 +190,8 @@ class Train:
             if scheduler == 'ReduceLROnPlateau':
                 lr_schedule = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,
                                                                          factor=0.1,
-                                                                         cooldown=10,
-                                                                         patience=20,
+                                                                         cooldown=50,
+                                                                         patience=50,
                                                                          verbose=True,
                                                                          min_lr=1e-15)
             elif scheduler == 'CycleScheduler':
@@ -303,14 +223,13 @@ class Train:
             valid_losses = []
             valid_accuracy = []
             for epoch in range(self.epochs):
-                if early_stop_counter == 100:
+                if early_stop_counter == 200:
                     if self.verbose > 0:
                         print('EARLY STOPPING.')
                     break
                 best_epoch = False
                 model.train()
 
-                # pbar = tqdm(total=len(train_loader))
                 for i, batch in enumerate(train_loader):
                     #    pbar.update(1)
                     model.zero_grad()
@@ -353,9 +272,7 @@ class Train:
                     train_accuracy = []
 
                 model.eval()
-                # pbar = tqdm(total=len(valid_loader))
                 for i, batch in enumerate(valid_loader):
-                    #    pbar.update(1)
                     images, targets = batch
                     images = images.to(device)
                     targets = targets.to(device)
@@ -372,7 +289,7 @@ class Train:
                     if epoch > 25:
                         lr_schedule.step(losses["valid"][-1])
                 mode = 'valid'
-                if epoch > 50 and epoch % self.epochs_per_print == 0:
+                if epoch > 10 and epoch % self.epochs_per_print == 0:
                     if (losses[mode][-1] < best_loss or best_loss == -1) \
                             and not np.isnan(losses[mode][-1]):
                         if self.verbose > 1:
@@ -383,42 +300,6 @@ class Train:
                     else:
                         early_stop_counter += 1
 
-                if epoch % self.epochs_per_checkpoint == 0:
-                    if best_epoch and self.save:
-                        if self.verbose > 1:
-                            print('Saving model...')
-                        save_checkpoint(model=model,
-                                        optimizer=optimizer,
-                                        maxpool=self.maxpool,
-                                        padding=self.padding,
-                                        padding_deconv=None,
-                                        learning_rate=learning_rate,
-                                        epoch=epoch,
-                                        checkpoint_path=None,
-                                        z_dim=self.n_classes,
-                                        gated=self.gated,
-                                        batchnorm=self.batchnorm,
-                                        losses=losses,
-                                        kl_divs=None,
-                                        losses_recon=None,
-                                        in_channels=self.in_channels,
-                                        out_channels=self.out_channels,
-                                        kernel_sizes=self.kernel_sizes,
-                                        kernel_sizes_deconv=None,
-                                        strides=self.strides,
-                                        strides_deconv=None,
-                                        dilatations=self.dilatations,
-                                        dilatations_deconv=None,
-                                        best_loss=best_loss,
-                                        save=self.save,
-                                        name=self.modelname,
-                                        n_flows=None,
-                                        flow_type=None,
-                                        n_res=n_res,
-                                        resblocks=resblocks,
-                                        h_last=None,
-                                        n_elements=None
-                                        )
                 if epoch % self.epochs_per_print == 0:
                     losses["valid"] += [np.mean(valid_losses)]
                     accuracies["valid"] += [np.mean(valid_accuracy)]
@@ -457,39 +338,20 @@ if __name__ == "__main__":
     random.seed(10)
 
     size = 32
-    in_channels = [1, 256]
-    out_channels = [256, 256]
-    kernel_sizes = [10, 8]
-    strides = [2, 1]
-    dilatations = [1, 1]
-    paddings = [2, 1]
     bs = 56
-    maxpool = 2
-    has_dense = True
-    batchnorm = True
-    gated = False
-    resblocks = False
+    n_neurons = [32768, 16]
     checkpoint_path = "checkpoints"
     path = '/home/simon/loris-api-presentation/fmri/'
 
     n_epochs = 10000
     save = False
-    training = Train(in_channels=in_channels,
-                     out_channels=out_channels,
-                     kernel_sizes=kernel_sizes,
-                     strides=strides,
-                     dilatations=dilatations,
+    training = Train(n_neurons=n_neurons,
                      path=path,
-                     padding=paddings,
                      batch_size=bs,
                      epochs=n_epochs,
                      checkpoint_path=checkpoint_path,
                      epochs_per_checkpoint=1,
-                     gated=gated,
-                     resblocks=resblocks,
-                     batchnorm=batchnorm,
                      save=save,
-                     maxpool=maxpool,
                      activation=torch.nn.ReLU,
                      init_func=torch.nn.init.xavier_uniform_,
                      n_classes=2,
@@ -502,7 +364,7 @@ if __name__ == "__main__":
             {"name": "niter", "type": "choice", "values": [1000, 1000]},
             {"name": "n_res", "type": "range", "bounds": [0, 1]},
             {"name": "scheduler", "type": "choice", "values":
-                ['CycleScheduler', 'CycleScheduler']},
+                ['ReduceLROnPlateau', 'ReduceLROnPlateau']},
             {"name": "optimizer", "type": "choice", "values": ['adamw', 'adamw']},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "momentum", "type": "range", "bounds": [0.9, 1.]},

@@ -7,7 +7,8 @@ from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from fmri.utils.CycleAnnealScheduler import CycleScheduler
 from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDataset
-from fmri.utils.transform_3d import Normalize, Flip90, Flip180, Flip270, XFlip, YFlip, ZFlip
+from fmri.utils.transform_3d import Normalize, RandomRotation3D, ColorJitter3D, Flip90, Flip180, Flip270, XFlip, YFlip, \
+    ZFlip, RandomAffine3D
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
 from fmri.models.unsupervised.SylvesterVAE3DCNN import SylvesterVAE
 from fmri.utils.plot_performance import plot_performance
@@ -21,13 +22,15 @@ import os
 
 output_directory = "checkpoints"
 import nibabel as nib
-from fmri.utils.utils import validation_split, validation_spliter
+from fmri.utils.utils import validation_spliter
 
 
 class Train:
     def __init__(self,
                  in_channels,
+                 in_channels2,
                  out_channels,
+                 out_channels2,
                  kernel_sizes,
                  kernel_sizes_deconv,
                  strides,
@@ -36,7 +39,9 @@ class Train:
                  dilatations_deconv,
                  save,
                  padding,
+                 padding2,
                  padding_deconv,
+                 padding_deconv2,
                  path,
                  init_func=torch.nn.init.kaiming_uniform_,
                  activation=torch.nn.GELU,
@@ -51,7 +56,8 @@ class Train:
                  batchnorm=False,
                  resblocks=False,
                  flow_type='vanilla',
-                 maxpool=3,
+                 maxpool=2,
+                 maxpool2=3,
                  verbose=2,
                  size=32,
                  mean=0.5,
@@ -66,7 +72,9 @@ class Train:
                  ):
         super().__init__()
         self.in_channels = in_channels
+        self.in_channels2 = in_channels2
         self.out_channels = out_channels
+        self.out_channels2 = out_channels2
         self.kernel_sizes = kernel_sizes
         self.kernel_sizes_deconv = kernel_sizes_deconv
         self.strides = strides
@@ -74,7 +82,9 @@ class Train:
         self.dilatations = dilatations
         self.dilatations_deconv = dilatations_deconv
         self.padding = padding
+        self.padding2 = padding2
         self.padding_deconv = padding_deconv
+        self.padding_deconv2 = padding_deconv
         self.batch_size = batch_size
         self.epochs = epochs
         self.fp16_run = fp16_run
@@ -87,6 +97,7 @@ class Train:
         self.resblocks = resblocks
         self.flow_type = flow_type
         self.maxpool = maxpool
+        self.maxpool2 = maxpool2
         self.save = save
         self.load = load
         self.verbose = verbose
@@ -178,8 +189,11 @@ class Train:
         if self.flow_type != 'o-sylvester':
             model = Autoencoder3DCNN(z_dim,
                                      self.maxpool,
+                                     # self.maxpool2,
                                      self.in_channels,
+                                     # self.in_channels2,
                                      self.out_channels,
+                                     # self.out_channels2,
                                      self.kernel_sizes,
                                      self.kernel_sizes_deconv,
                                      self.strides,
@@ -187,7 +201,9 @@ class Train:
                                      self.dilatations,
                                      self.dilatations_deconv,
                                      self.padding,
+                                     # self.padding2,
                                      self.padding_deconv,
+                                     # self.padding_deconv2,
                                      has_dense=self.has_dense,
                                      batchnorm=self.batchnorm,
                                      flow_type=self.flow_type,
@@ -279,14 +295,24 @@ class Train:
         model = model.to(device)
 
         train_transform = transforms.Compose([
+            # transforms.RandomChoice([
             XFlip(),
             YFlip(),
             ZFlip(),
-            Flip90(),
-            Flip180(),
-            Flip270(),
-            torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
-            Normalize()
+            # ]),
+            transforms.RandomChoice([
+                Flip90(),
+                Flip180(),
+                Flip270()
+            ]),
+            # ColorJitter3D(.1, .1, .1, .1),
+            # transforms.RandomChoice(
+            #    [
+            RandomRotation3D(90, 0),
+            RandomRotation3D(90, 1),
+            RandomRotation3D(90, 2)
+            #    ]
+            # )
         ])
         all_set = MRIDataset(self.path, transform=train_transform)
         spliter = validation_spliter(all_set, cv=5)
@@ -564,6 +590,7 @@ class Train:
             best_losses += [best_loss]
         return min(best_losses)
 
+
 if __name__ == "__main__":
     torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
@@ -574,8 +601,8 @@ if __name__ == "__main__":
 
     size = 32
     z_dim = 50
-    in_channels = [1, 128, 128, 256, 300]
-    out_channels = [128, 128, 256, 300, 300]
+    in_channels = [1, 256, 256, 256, 256]
+    out_channels = [256, 256, 256, 256, 256]
     kernel_sizes = [3, 3, 3, 3, 3]
     kernel_sizes_deconv = [3, 3, 3, 3, 3]
     strides = [1, 1, 1, 1, 1]
@@ -585,10 +612,15 @@ if __name__ == "__main__":
     paddings = [1, 1, 1, 1, 1]
     paddings_deconv = [1, 1, 1, 1, 1]
     dilatations_deconv = [1, 1, 1, 1, 1]
+    in_channels2 = [1, 64, 128, 256]
+    out_channels2 = [64, 128, 256, 256]
+    paddings2 = [1, 1, 1, 1]
+    paddings_deconv2 = [1, 1, 1, 1]
     n_flows = 10
     bs = 3
     maxpool = 2
-    flow_type = 'quantizer'
+    maxpool2 = 3
+    flow_type = 'o-sylvester'
     epochs_per_checkpoint = 1
     has_dense = True
     batchnorm = True
@@ -599,9 +631,11 @@ if __name__ == "__main__":
     path = basedir + '32x32/'
 
     n_epochs = 10000
-    save = True
+    save = False
     training = Train(in_channels=in_channels,
+                     in_channels2=in_channels2,
                      out_channels=out_channels,
+                     out_channels2=out_channels2,
                      kernel_sizes=kernel_sizes,
                      kernel_sizes_deconv=kernel_sizes_deconv,
                      strides=strides,
@@ -610,7 +644,9 @@ if __name__ == "__main__":
                      dilatations_deconv=dilatations_deconv,
                      path=path,
                      padding=paddings,
+                     padding2=paddings2,
                      padding_deconv=paddings_deconv,
+                     padding_deconv2=paddings_deconv2,
                      batch_size=bs,
                      epochs=n_epochs,
                      checkpoint_path=checkpoint_path,
@@ -622,10 +658,11 @@ if __name__ == "__main__":
                      flow_type=flow_type,
                      save=save,
                      maxpool=maxpool,
+                     maxpool2=maxpool2,
                      plot_perform=False,
                      activation=torch.nn.ReLU,
-                     mean=0.5,
-                     std=0.5,
+                     mean=0.1,
+                     std=0.1,
                      init_func=torch.nn.init.xavier_uniform_,
                      mode='valid',
                      load=False,
@@ -636,12 +673,12 @@ if __name__ == "__main__":
             {"name": "mom_range", "type": "range", "bounds": [0., 0.1]},
             {"name": "num_elements", "type": "range", "bounds": [1, 5]},
             {"name": "niter", "type": "choice", "values": [100, 1000]},
-            {"name": "n_res", "type": "range", "bounds": [1, 20]},
-            {"name": "z_dim", "type": "range", "bounds": [200, 256]},
+            {"name": "n_res", "type": "range", "bounds": [1, 10]},
+            {"name": "z_dim", "type": "range", "bounds": [100, 256]},
             {"name": "n_flows", "type": "range", "bounds": [2, 10]},
             {"name": "scheduler", "type": "choice", "values":
-                ['CycleScheduler', 'CycleScheduler']},
-            {"name": "optimizer", "type": "choice", "values": ['rmsprop', 'rmsprop']},
+                ['ReduceLROnPlateau', 'ReduceLROnPlateau']},
+            {"name": "optimizer", "type": "choice", "values": ['adamw', 'adamw']},
             {"name": "l1", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "l2", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},

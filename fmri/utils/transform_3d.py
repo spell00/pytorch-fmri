@@ -2,6 +2,11 @@ import torch.nn.functional as F
 from random import random, randint
 from tqdm import tqdm
 import torch
+import numpy as np
+import numbers
+from PIL import Image
+import torchvision
+
 
 class Normalize(object):
     """Normalize a tensor image with mean and standard deviation.
@@ -58,6 +63,7 @@ class XFlip(object):
         else:
             return tensor
 
+
 class YFlip(object):
     def __init__(self, inplace=False):
         self.inplace = inplace
@@ -101,3 +107,81 @@ class Flip270(object):
         else:
             return tensor
 
+
+# following classes adapted from https://raw.githubusercontent.com/perone/medicaltorch/master/medicaltorch/transforms.py
+
+class RandomRotation3D(object):
+    """Make a rotation of the volume's values.
+
+    :param degrees: Maximum rotation's degrees.
+    :param axis: Axis of the rotation.
+    """
+
+    def __init__(self, degrees, axis=0, labeled=True):
+        if isinstance(degrees, numbers.Number):
+            if degrees < 0:
+                raise ValueError("If degrees is a single number, it must be positive.")
+            self.degrees = (-degrees, degrees)
+        else:
+            if len(degrees) != 2:
+                raise ValueError("If degrees is a sequence, it must be of len 2.")
+            self.degrees = degrees
+        self.labeled = labeled
+        self.axis = axis
+
+    @staticmethod
+    def get_params(degrees):
+        angle = np.random.uniform(degrees[0], degrees[1])
+        return angle
+
+    def __call__(self, input_data):
+        angle = self.get_params(self.degrees)
+        input_data = input_data.detach().cpu().numpy()
+        input_rotated = np.zeros(input_data.shape, dtype=input_data.dtype)
+
+        for x in range(input_data.shape[self.axis]):
+            if self.axis == 0:
+                pil = Image.fromarray(input_data[x, :, :], mode='F')
+                input_rotated[x, :, :] = torchvision.transforms.functional.rotate(pil, angle)
+            if self.axis == 1:
+                pil = Image.fromarray(input_data[:, x, :], mode='F')
+                input_rotated[:, x, :] = torchvision.transforms.functional.rotate(pil, angle)
+            if self.axis == 2:
+                pil = Image.fromarray(input_data[:, :, x], mode='F')
+                input_rotated[:, :, x] = torchvision.transforms.functional.rotate(pil, angle)
+        return torch.Tensor(input_rotated)
+
+class RandomAffine3D(object):
+    def __init__(self, axis=0, translate=[10, 10], scale=0.1, shear=0.1):
+        self.random_affine = torchvision.transforms.RandomAffine(0, translate, scale, shear)
+        self.axis = axis
+
+    def __call__(self, input_data):
+        input_data = input_data.detach().cpu().numpy()
+        input_affine = np.zeros(input_data.shape, dtype=input_data.dtype)
+
+        for x in range(input_data.shape[0]):
+            if self.axis == 0:
+                input_affine[x, :, :] = self.random_affine(Image.fromarray(input_data[x, :, :], mode='L'))
+            if self.axis == 1:
+                input_affine[:, x, :] = self.random_affine(Image.fromarray(input_data[:, x, :], mode='L'))
+            if self.axis == 2:
+                input_affine[:, :, x] = self.random_affine(Image.fromarray(input_data[:, :, x], mode='L'))
+        return torch.Tensor(input_affine)
+
+class ColorJitter3D(object):
+    def __init__(self, brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1):
+        self.color_jitter = torchvision.transforms.ColorJitter(brightness, contrast, saturation, hue)
+
+    @staticmethod
+    def get_params(degrees):
+        angle = np.random.uniform(degrees[0], degrees[1])
+        return angle
+
+    def __call__(self, input_data):
+        input_data = input_data.detach().cpu().numpy()
+        input_jittered = np.zeros(input_data.shape, dtype=input_data.dtype)
+
+        for x in range(input_data.shape[0]):
+            input_jittered[x, :, :]  = self.color_jitter(Image.fromarray(input_data[x, :, :], mode='L'))
+        return torch.Tensor(input_jittered)
