@@ -8,7 +8,9 @@ from fmri.models.supervised.resnetcnn3d import ConvResnet3D
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
 from fmri.models.unsupervised.SylvesterVAE3DCNN import SylvesterVAE
 import random
+
 random.seed(42)
+
 
 def _resize_data(data, new_size=(160, 160, 160)):
     initial_size_x = data.shape[0]

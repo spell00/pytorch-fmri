@@ -6,7 +6,7 @@ import json
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from fmri.utils.CycleAnnealScheduler import CycleScheduler
-from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDataset
+from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDatasetClassifier
 from fmri.utils.transform_3d import Normalize, RandomRotation3D, ColorJitter3D, Flip90, Flip180, Flip270, XFlip, YFlip, \
     ZFlip, RandomAffine3D
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
@@ -295,27 +295,31 @@ class Train:
         model = model.to(device)
 
         train_transform = transforms.Compose([
-            # transforms.RandomChoice([
-            XFlip(),
-            YFlip(),
-            ZFlip(),
-            # ]),
-            transforms.RandomChoice([
-                Flip90(),
-                Flip180(),
-                Flip270()
+            transforms.RandomApply([
+                XFlip(),
+                YFlip(),
+                ZFlip(),
+                transforms.RandomChoice([
+                    Flip90(),
+                    Flip180(),
+                    Flip270()
+                ]),
+                # ColorJitter3D(.01, .01, .01, .01),
+                # transforms.RandomChoice([
+                #     RandomAffine3D(0, [.05, .05], None, None),
+                #     RandomAffine3D(1, [.05, .05], None, None),
+                #     RandomAffine3D(2, [.05, .05], None, None),
+                # ]),
+                RandomRotation3D(90, 0),
+                RandomRotation3D(90, 1),
+                RandomRotation3D(90, 2),
+
             ]),
-            # ColorJitter3D(.1, .1, .1, .1),
-            # transforms.RandomChoice(
-            #    [
-            RandomRotation3D(90, 0),
-            RandomRotation3D(90, 1),
-            RandomRotation3D(90, 2)
-            #    ]
-            # )
+            torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
+            Normalize()
         ])
-        all_set = MRIDataset(self.path, transform=train_transform)
-        spliter = validation_spliter(all_set, cv=5)
+        all_set = MRIDatasetClassifier(self.path, transform=train_transform)
+        spliter = validation_spliter(all_set, cv=self.cross_validation)
 
         epoch_offset = max(1, epoch)
 
@@ -398,6 +402,14 @@ class Train:
             early_stop_counter = 0
             print("\n\n\nCV:", cv, "/", self.cross_validation, "\nTrain samples:", len(train_set),
                   "\nValid samples:", len(valid_set), "\n\n\n")
+            valid_losses = []
+            valid_kld = []
+            valid_recons = []
+            valid_abs_error = []
+            train_losses = []
+            train_abs_error = []
+            train_kld = []
+            train_recons = []
 
             for epoch in range(epoch_offset, self.epochs):
                 if early_stop_counter == self.early_stop:
@@ -406,14 +418,10 @@ class Train:
                     break
                 best_epoch = False
                 model.train()
-                train_losses = []
-                train_abs_error = []
-                train_kld = []
-                train_recons = []
 
                 for i, batch in enumerate(train_loader):
                     model.zero_grad()
-                    images = batch
+                    images, _ = batch
                     images = torch.autograd.Variable(images).to(device)
                     reconstruct, kl = model(images)
                     reconstruct = reconstruct[:, :,
@@ -479,14 +487,14 @@ class Train:
                                       kl_divs["train"][-1],
                                       losses_recon["train"][-1])
                               )
+                    train_losses = []
+                    train_abs_error = []
+                    train_kld = []
+                    train_recons = []
 
                 model.eval()
-                valid_losses = []
-                valid_kld = []
-                valid_recons = []
-                valid_abs_error = []
                 for i, batch in enumerate(valid_loader):
-                    images = batch
+                    images, _ = batch
                     images = images.to(device)
                     reconstruct, kl = model(images)
                     reconstruct = reconstruct[:, :,
@@ -576,6 +584,11 @@ class Train:
                                       losses_recon["valid"][-1]
                                       )
                               )
+                        valid_losses = []
+                        valid_kld = []
+                        valid_recons = []
+                        valid_abs_error = []
+
                     if self.verbose > 1:
                         print("Current LR:", optimizer.param_groups[0]['lr'])
                     if 'momentum' in optimizer.param_groups[0].keys():
@@ -627,8 +640,7 @@ if __name__ == "__main__":
     gated = False
     resblocks = True
     checkpoint_path = "checkpoints"
-    basedir = '/run/media/simon/DATA&STUFF/data/biology/images/t1/'
-    path = basedir + '32x32/'
+    path = '/home/simon/loris-api-presentation/fmri/'
 
     n_epochs = 10000
     save = False
@@ -666,25 +678,26 @@ if __name__ == "__main__":
                      init_func=torch.nn.init.xavier_uniform_,
                      mode='valid',
                      load=False,
+                     cv=5
                      )
 
     best_parameters, values, experiment, model = optimize(
         parameters=[
             {"name": "warmup", "type": "choice", "values": [0, 0]},
             {"name": "mom_range", "type": "range", "bounds": [0., 0.1]},
-            {"name": "num_elements", "type": "range", "bounds": [1, 5]},
+            {"name": "num_elements", "type": "range", "bounds": [1, 8]},
             {"name": "niter", "type": "choice", "values": [100, 1000]},
-            {"name": "n_res", "type": "range", "bounds": [1, 10]},
+            {"name": "n_res", "type": "range", "bounds": [1, 20]},
             {"name": "z_dim", "type": "range", "bounds": [100, 256]},
             {"name": "n_flows", "type": "range", "bounds": [2, 10]},
             {"name": "scheduler", "type": "choice", "values":
-                ['ReduceLROnPlateau', 'ReduceLROnPlateau']},
+                ['CycleScheduler', 'CycleScheduler']},
             {"name": "optimizer", "type": "choice", "values": ['adamw', 'adamw']},
             {"name": "l1", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "l2", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "momentum", "type": "range", "bounds": [0.9, 1.]},
-            {"name": "learning_rate", "type": "range", "bounds": [1e-4, 1e-3], "log_scale": True},
+            {"name": "learning_rate", "type": "range", "bounds": [1e-5, 1e-4], "log_scale": True},
         ],
         evaluation_function=training.train,
         objective_name='loss',

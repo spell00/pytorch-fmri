@@ -154,22 +154,8 @@ def validation_split(dataset, val_share=0.1):
     val_offset = int(len(dataset) * (1 - val_share))
     return PartialDataset(dataset, 0, val_offset), PartialDataset(dataset, val_offset, len(dataset) - val_offset)
 
-def validation_split(dataset, val_share=0.1):
-    """
-       Split a (training and vaidation combined) dataset into training and validation.
-       Note that to be statistically sound, the items in the dataset should be statistically
-       independent (e.g. not sorted by class, not several instances of the same dataset that
-       could end up in either set).
-       inputs:
-          dataset:   ("training") dataset to split into training and validation
-          val_share: fraction of validation data (should be 0<val_share<1, default: 0.1)
-       returns: input dataset split into test_ds, val_ds
-       """
-    val_offset = int(len(dataset) * (1 - val_share))
-    return PartialDataset(dataset, 0, val_offset), PartialDataset(dataset, val_offset, len(dataset) - val_offset)
-
 class validation_spliter:
-    def __init__(self, dataset, cv=3):
+    def __init__(self, dataset, cv):
         self.cv = cv
         self.dataset = dataset
         self.current_cv = 0
@@ -178,15 +164,15 @@ class validation_spliter:
 
     def __next__(self):
         self.current_cv += 1
-        if self.current_cv == self.cv:
-            val_offset = len(self.dataset) - self.current_pos
-        else:
-            val_offset = self.val_offset
-        partial_dataset = PartialDataset(self.dataset, 0, val_offset), PartialDataset(self.dataset, val_offset, len(self.dataset) - val_offset)
+        # if self.current_cv == self.cv:
+        #     val_offset = len(self.dataset) - self.current_pos
+        # else:
+        #     val_offset = self.val_offset
+        partial_dataset = PartialDataset(self.dataset, 0, self.val_offset), PartialDataset(self.dataset, self.val_offset, len(self.dataset) - self.val_offset)
 
         # Move the samples currently used for the validation set at the end for the next split
-        tmp = self.dataset.samples[:val_offset]
-        self.dataset.samples = self.dataset.samples[val_offset:] + tmp
+        tmp = self.dataset.samples[:self.val_offset]
+        self.dataset.samples = self.dataset.samples[self.val_offset:] + tmp
 
         return partial_dataset
 

@@ -14,7 +14,7 @@ kernel_sizes = None
 strides = None
 
 
-def random_init(m, init_func=torch.nn.init.orthogonal_):
+def random_init(m, init_func=torch.nn.init.xavier_uniform_):
     if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
         init_func(m.weight.data)
         if m.bias is not None:
@@ -337,7 +337,7 @@ class Autoencoder3DCNN(torch.nn.Module):
         if self.flow_type == "quantizer":
             self.flow = Quantize(z_dim, self.n_embed)
 
-    def random_init(self, init_func=torch.nn.init.orthogonal_):
+    def random_init(self, init_func=torch.nn.init.xavier_uniform_):
         for m in self.modules():
             if isinstance(m, nn.Linear) or isinstance(m, nn.Conv3d) or isinstance(m, nn.ConvTranspose3d):
                 init_func(m.weight.data)

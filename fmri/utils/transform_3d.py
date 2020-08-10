@@ -151,9 +151,10 @@ class RandomRotation3D(object):
                 input_rotated[:, :, x] = torchvision.transforms.functional.rotate(pil, angle)
         return torch.Tensor(input_rotated)
 
+
 class RandomAffine3D(object):
-    def __init__(self, axis=0, translate=[10, 10], scale=0.1, shear=0.1):
-        self.random_affine = torchvision.transforms.RandomAffine(0, translate, scale, shear)
+    def __init__(self, axis=0, translate=0.1, scale=0.1, shear=0.1):
+        self.random_affine = torchvision.transforms.RandomAffine(translate, scale, shear)
         self.axis = axis
 
     def __call__(self, input_data):
@@ -167,7 +168,8 @@ class RandomAffine3D(object):
                 input_affine[:, x, :] = self.random_affine(Image.fromarray(input_data[:, x, :], mode='L'))
             if self.axis == 2:
                 input_affine[:, :, x] = self.random_affine(Image.fromarray(input_data[:, :, x], mode='L'))
-        return torch.Tensor(input_affine)
+        return torch.Tensor(input_affine) / 255
+
 
 class ColorJitter3D(object):
     def __init__(self, brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1):
@@ -183,5 +185,5 @@ class ColorJitter3D(object):
         input_jittered = np.zeros(input_data.shape, dtype=input_data.dtype)
 
         for x in range(input_data.shape[0]):
-            input_jittered[x, :, :]  = self.color_jitter(Image.fromarray(input_data[x, :, :], mode='L'))
-        return torch.Tensor(input_jittered)
+            input_jittered[x, :, :] = self.color_jitter(Image.fromarray(input_data[x, :, :], mode='L'))
+        return torch.Tensor(input_jittered) / 255
