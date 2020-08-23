@@ -221,7 +221,7 @@ class Predict:
                                  drop_last=True)
 
         # pbar = tqdm(total=len(train_loader))
-        f = open("demofile2.txt", "w")
+        f = open("submission.csv", "w")
         f.write("Patient_Week,FVC,Confidence\n")
         for i, batch in enumerate(test_loader):
             #    pbar.update(1)
