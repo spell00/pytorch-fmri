@@ -207,7 +207,7 @@ class Train:
                                         dilatations_deconv=None,
                                         name=self.modelname,
                                         n_res=n_res,
-                                        resblocks=resblocks,
+                                        resblocks=self.resblocks,
                                         h_last=None,
                                         n_elements=None,
                                         n_flows=None
