@@ -185,7 +185,7 @@ class Train:
             model, optimizer, \
             epoch, losses, \
             kl_divs, losses_recon, \
-            best_loss = load_checkpoint(checkpoint_path,
+            best_loss = load_checkpoint(self.checkpoint_path,
                                         model,
                                         self.maxpool,
                                         save=self.save,
