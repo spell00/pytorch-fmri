@@ -3,6 +3,15 @@ import argparse
 import torch.nn as nn
 import torch
 from ..utils.masked_layer import GatedConv3d
+from torch.autograd import Variable
+import torch.nn as nn
+import torch.nn.functional as F
+from medicaltorch import transforms as mt_transforms
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = "cpu"
+
 
 
 def random_init(m, init_func=torch.nn.init.xavier_uniform_):
@@ -10,6 +19,52 @@ def random_init(m, init_func=torch.nn.init.xavier_uniform_):
         init_func(m.weight.data)
         if m.bias is not None:
             m.bias.data.zero_()
+
+class Stochastic(nn.Module):
+    """
+    Base stochastic layer that uses the
+    reparametrization trick [Kingma 2013]
+    to draw a sample from a distribution
+    parametrised by mu and log_var.
+    """
+
+    def reparametrize(self, mu, log_var):
+        epsilon = Variable(torch.randn(mu.size()), requires_grad=False)
+
+        epsilon = epsilon.to(device)
+
+        # log_std = 0.5 * log_var
+        # std = exp(log_std)
+        std = log_var.mul(0.5).exp_()
+
+        # y = x.T * beta + std * epsilon
+        # mu is x.T * beta
+        # y = mu _ std * epsilon
+        y = (mu).addcmul(std, epsilon)
+        return y
+
+
+class GaussianSample(Stochastic):
+    """
+    Layer that represents a sample from a
+    Gaussian distribution.
+    """
+
+    def __init__(self, in_features, out_features):
+        super(GaussianSample, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.mu = nn.Linear(in_features, out_features).to(device)
+        self.log_var = nn.Linear(in_features, out_features).to(device)
+
+    def forward(self, x):
+        mu = self.mu(x)
+        log_var = F.softplus(self.log_var(x))
+
+        return self.reparametrize(mu, log_var), mu, log_var
+
+    def mle(self, x):
+        return self.mu(x)
 
 
 
@@ -62,6 +117,8 @@ class ConvResnet3D(nn.Module):
                  padding,
                  batchnorm,
                  n_classes,
+                 is_bayesian,
+                 random_node='output',
                  activation=torch.nn.ReLU,
                  n_res=3,
                  gated=True,
@@ -75,6 +132,12 @@ class ConvResnet3D(nn.Module):
             device = 'cpu'
         self.maxpool = nn.MaxPool3d(maxpool, return_indices=False)
 
+        self.is_bayesian = is_bayesian
+        if is_bayesian:
+            if random_node == "output":
+                self.GaussianSample = GaussianSample(1, 1)
+            elif(random_node == "last"):
+                self.GaussianSample = GaussianSample(1233, 1233)
         self.device = device
         self.conv_layers = nn.ModuleList()
         self.deconv_layers = nn.ModuleList()
@@ -117,7 +180,7 @@ class ConvResnet3D(nn.Module):
                     self.resconv += [ResBlock3D(ins, outs, activation, device)]
             self.bns += [nn.BatchNorm3d(num_features=outs)]
         self.dropout3d = nn.Dropout3d(0.5)
-        self.dense1 = torch.nn.Linear(in_features=out_channels[-1], out_features=n_classes)
+        self.dense1 = torch.nn.Linear(in_features=out_channels[-1], out_features=32)
         self.dense2 = torch.nn.Linear(in_features=32, out_features=n_classes)
         self.dense1_bn = nn.BatchNorm1d(num_features=32)
         self.dense2_bn = nn.BatchNorm1d(num_features=n_classes)
@@ -153,18 +216,21 @@ class ConvResnet3D(nn.Module):
 
         z = x.squeeze()
         z = self.dense1(z)
-        #if self.batchnorm:
-        #    if z.shape[0] != 1:
-        #        z = self.dense1_bn(z)
-        #z = self.activation(z)
-        #z = self.dropout(z)
-        #z = self.dense2(z)
+        if self.batchnorm:
+           if z.shape[0] != 1:
+               z = self.dense1_bn(z)
+        z = self.activation(z)
+        z = self.dropout(z)
+        z = self.dense2(z)
+        z = torch.sigmoid_(z)
+        if self.is_bayesian:
+            z, mu, log_var = self.GaussianSample.float()(z)
+
         # if self.batchnorm:
         #     if z.shape[0] != 1:
         #         z = self.dense2_bn(z)
         # z = self.dropout(z)
-        # z = self.log_softmax(z, 1)
-        return z
+        return z, mu, log_var
 
     def get_parameters(self):
         for name, param in self.named_parameters():

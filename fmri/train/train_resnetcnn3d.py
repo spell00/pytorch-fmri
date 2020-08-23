@@ -4,11 +4,13 @@ import torch
 import torch.nn as nn
 import numpy as np
 import json
+from scipy.stats import norm
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
+from fmri.models.utils.distributions import log_gaussian
 from fmri.utils.activations import Swish, Mish
 from fmri.utils.CycleAnnealScheduler import CycleScheduler
-from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDatasetClassifier
+from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDatasetClassifier, CTDataset
 from fmri.utils.transform_3d import Normalize, RandomRotation3D, ColorJitter3D, Flip90, Flip180, Flip270, XFlip, YFlip, \
     ZFlip, RandomAffine3D
 from fmri.models.supervised.resnetcnn3d import ConvResnet3D
@@ -17,7 +19,6 @@ import torchvision
 from torchvision import transforms
 from ax.service.managed_loop import optimize
 import random
-from medicaltorch import transforms as mt_transforms
 
 import os
 
@@ -60,7 +61,9 @@ class Train:
                  std=0.5,
                  plot_perform=True,
                  val_share=0.1,
-                 cross_validation=5
+                 cross_validation=5,
+                 is_bayesian=True,
+                 random_node='output'
                  ):
         super().__init__()
         self.n_classes = n_classes
@@ -92,6 +95,7 @@ class Train:
         self.val_share = val_share
         self.plot_perform = plot_perform
         self.cross_validation = cross_validation
+        self.is_bayesian = is_bayesian
 
     def train(self, params):
         if torch.cuda.is_available():
@@ -144,13 +148,15 @@ class Train:
                              self.padding,
                              self.batchnorm,
                              self.n_classes,
+                             is_bayesian=self.is_bayesian,
                              activation=torch.nn.ReLU,
                              n_res=n_res,
                              gated=self.gated,
                              has_dense=self.has_dense,
                              resblocks=self.resblocks,
                              ).to(device)
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.MSELoss()
+        l1 = nn.L1Loss()
         if optimizer_type == 'adamw':
             optimizer = torch.optim.AdamW(params=model.parameters(),
                                           lr=learning_rate,
@@ -203,7 +209,8 @@ class Train:
                                         n_res=n_res,
                                         resblocks=resblocks,
                                         h_last=None,
-                                        n_elements=None
+                                        n_elements=None,
+                                        n_flows=None
                                         )
         model = model.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
@@ -220,7 +227,7 @@ class Train:
                 Flip180(),
                 Flip270()
             ]),
-            ColorJitter3D(.1, .1, .1, .1),
+            # ColorJitter3D(.1, .1, .1, .1),
             #transforms.RandomChoice(
             #    [
             #        RandomAffine3D(0, [.1, .1], [.1, .1], [.1, .1]),
@@ -237,11 +244,11 @@ class Train:
             ),
 
             torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
-            Normalize()
+            # Normalize()
         ])
         """
         """
-        all_set = MRIDatasetClassifier(self.path, transform=train_transform, size=self.size)
+        all_set = CTDataset(self.path, transform=train_transform, size=self.size)
         spliter = validation_spliter(all_set, cv=self.cross_validation)
 
         print("Training Started on device:", device)
@@ -287,6 +294,10 @@ class Train:
                 "train": [],
                 "valid": [],
             }
+            log_gaussians = {
+                "train": [],
+                "valid": [],
+            }
             accuracies = {
                 "train": [],
                 "valid": [],
@@ -301,6 +312,8 @@ class Train:
             train_losses = []
             train_accuracy = []
             valid_losses = []
+            train_log_gauss = []
+            valid_log_gauss = []
             valid_accuracy = []
             for epoch in range(self.epochs):
                 if early_stop_counter == 100:
@@ -314,20 +327,22 @@ class Train:
                 for i, batch in enumerate(train_loader):
                     #    pbar.update(1)
                     model.zero_grad()
-                    images, targets = batch
+                    _, images, targets = batch
 
                     images = images.to(device)
                     targets = targets.to(device)
 
-                    preds = model(images)
+                    _, mu, log_var = model(images)
+                    rv = norm(mu.detach().cpu().numpy(), np.exp(log_var.detach().cpu().numpy()))
+                    train_log_gauss += [rv.pdf(mu.detach().cpu().numpy())]
 
-                    loss = criterion(preds, targets)
-
+                    # loss = criterion(preds, targets.cuda()) # - 0.01 * log_gaussian(preds.view(-1), mu.view(-1), log_var.view(-1))
+                    loss = -log_gaussian(targets.view(-1), mu.view(-1), torch.exp(log_var.view(-1)))
+                    #loss = torch.exp()
+                    l1_loss = l1(mu, targets.cuda())
                     loss.backward()
 
-                    accuracy = sum(
-                        [1 if torch.argmax(pred) == target else 0 for (pred, target) in zip(preds, targets)]) / len(
-                        targets)
+                    accuracy = l1_loss.item() * all_set.max_fvc
                     train_accuracy += [accuracy]
 
                     train_losses += [loss.item()]
@@ -339,40 +354,68 @@ class Train:
                     del loss
 
                 if epoch % self.epochs_per_print == 0:
-                    losses["train"] += [np.mean(train_losses)]
+                    losses["train"] += [np.mean(train_losses) / self.batch_size]
                     accuracies["train"] += [np.mean(train_accuracy)]
+                    log_gaussians["train"] += [np.mean(train_log_gauss)]
                     if self.verbose > 1:
                         print("Epoch: {}:\t"
                               "Train Loss: {:.5f} , "
                               "Accuracy: {:.3f} , "
+                              "confidence: {:.3f} , "
                               .format(epoch,
                                       losses["train"][-1],
-                                      accuracies["train"][-1]
+                                      accuracies["train"][-1],
+                                      log_gaussians["train"][-1]
                                       ))
                     train_losses = []
                     train_accuracy = []
+                    train_log_gauss = []
 
                 model.eval()
                 # pbar = tqdm(total=len(valid_loader))
                 for i, batch in enumerate(valid_loader):
                     #    pbar.update(1)
-                    images, targets = batch
+                    _, images, targets = batch
                     images = images.to(device)
                     targets = targets.to(device)
-                    preds = model(images)
-
-                    loss = criterion(preds, targets)
+                    _, mu, log_var = model(images)
+                    rv = norm(mu.detach().cpu().numpy(), np.exp(log_var.detach().cpu().numpy()))
+                    loss = -log_gaussian(targets.view(-1), mu.view(-1), torch.exp(log_var.view(-1)))
                     valid_losses += [loss.item()]
-                    accuracy = sum(
-                        [1 if torch.argmax(pred) == target else 0 for (pred, target) in zip(preds, targets)]) / len(
-                        targets)
+                    valid_log_gauss += [rv.pdf(mu.detach().cpu().numpy())]
+                    l1_loss = l1(mu, targets.cuda())
+
+                    accuracy = l1_loss.item() * all_set.max_fvc
                     valid_accuracy += [accuracy]
-                    logger.add_scalar('training loss', np.log2(loss.item()), i + len(train_loader) * epoch)
+                    logger.add_scalar('training loss', loss.item(), i + len(train_loader) * epoch)
                 if scheduler == "ReduceLROnPlateau":
                     if epoch > 25:
                         lr_schedule.step(losses["valid"][-1])
+                if epoch % self.epochs_per_print == 0:
+                    losses["valid"] += [np.mean(valid_losses) / 2]
+                    accuracies["valid"] += [np.mean(valid_accuracy)]
+                    log_gaussians["valid"] += [np.mean(valid_log_gauss)]
+                    if self.verbose > 0:
+                        print("Epoch: {}:\t"
+                              "Valid Loss: {:.5f} , "
+                              "Accuracy: {:.3f} "
+                              "confidence: {:.3f} "
+                              .format(epoch,
+                                      losses["valid"][-1],
+                                      accuracies["valid"][-1],
+                                      log_gaussians["valid"][-1]
+                                      )
+                              )
+                    if self.verbose > 1:
+                        print("Current LR:", optimizer.param_groups[0]['lr'])
+                    if 'momentum' in optimizer.param_groups[0].keys():
+                        print("Current Momentum:", optimizer.param_groups[0]['momentum'])
+                    valid_losses = []
+                    valid_accuracy = []
+                    valid_log_gauss = []
+
                 mode = 'valid'
-                if epoch > 50 and epoch % self.epochs_per_print == 0:
+                if epoch > 1 and epoch % self.epochs_per_print == 0:
                     if (losses[mode][-1] < best_loss or best_loss == -1) \
                             and not np.isnan(losses[mode][-1]):
                         if self.verbose > 1:
@@ -394,7 +437,7 @@ class Train:
                                         padding_deconv=None,
                                         learning_rate=learning_rate,
                                         epoch=epoch,
-                                        checkpoint_path=None,
+                                        checkpoint_path=checkpoint_path,
                                         z_dim=self.n_classes,
                                         gated=self.gated,
                                         batchnorm=self.batchnorm,
@@ -417,26 +460,8 @@ class Train:
                                         n_res=n_res,
                                         resblocks=resblocks,
                                         h_last=None,
-                                        n_elements=None
+                                        n_elements=None,
                                         )
-                if epoch % self.epochs_per_print == 0:
-                    losses["valid"] += [np.mean(valid_losses)]
-                    accuracies["valid"] += [np.mean(valid_accuracy)]
-                    if self.verbose > 0:
-                        print("Epoch: {}:\t"
-                              "Valid Loss: {:.5f} , "
-                              "Accuracy: {:.3f} "
-                              .format(epoch,
-                                      losses["valid"][-1],
-                                      accuracies["valid"][-1],
-                                      )
-                              )
-                    if self.verbose > 1:
-                        print("Current LR:", optimizer.param_groups[0]['lr'])
-                    if 'momentum' in optimizer.param_groups[0].keys():
-                        print("Current Momentum:", optimizer.param_groups[0]['momentum'])
-                    valid_losses = []
-                    valid_accuracy = []
 
                 if self.plot_perform:
                     plot_performance(loss_total=losses, losses_recon=None, accuracies=accuracies,
@@ -457,23 +482,23 @@ if __name__ == "__main__":
     random.seed(10)
 
     size = 32
-    in_channels = [1, 256]
-    out_channels = [256, 256]
-    kernel_sizes = [10, 8]
-    strides = [2, 1]
-    dilatations = [1, 1]
-    paddings = [2, 1]
-    bs = 56
+    in_channels = [1, 256, 256, 256, 256]
+    out_channels = [256, 256, 256, 256, 256]
+    kernel_sizes = [3, 3, 3, 3, 3]
+    strides = [1, 1, 1, 1, 1]
+    dilatations = [1, 1, 1, 1, 1]
+    paddings = [1, 1, 1, 1, 1]
+    bs = 16
     maxpool = 2
     has_dense = True
     batchnorm = True
     gated = False
     resblocks = False
     checkpoint_path = "checkpoints"
-    path = '/home/simon/loris-api-presentation/fmri/'
+    path = '/run/media/simon/DATA&STUFF/data/train_32x32/'
 
     n_epochs = 10000
-    save = False
+    save = True
     training = Train(in_channels=in_channels,
                      out_channels=out_channels,
                      kernel_sizes=kernel_sizes,
@@ -492,7 +517,7 @@ if __name__ == "__main__":
                      maxpool=maxpool,
                      activation=torch.nn.ReLU,
                      init_func=torch.nn.init.xavier_uniform_,
-                     n_classes=2,
+                     n_classes=1,
                      epochs_per_print=10,
                      size=size
                      )
@@ -506,7 +531,7 @@ if __name__ == "__main__":
             {"name": "optimizer", "type": "choice", "values": ['adamw', 'adamw']},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "momentum", "type": "range", "bounds": [0.9, 1.]},
-            {"name": "learning_rate", "type": "range", "bounds": [1e-5, 1e-3], "log_scale": True},
+            {"name": "learning_rate", "type": "range", "bounds": [1e-4, 1e-3], "log_scale": True},
         ],
         evaluation_function=training.train,
         objective_name='loss',

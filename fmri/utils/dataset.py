@@ -8,6 +8,8 @@ from fmri.models.supervised.resnetcnn3d import ConvResnet3D
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
 from fmri.models.unsupervised.SylvesterVAE3DCNN import SylvesterVAE
 import random
+import pydicom
+import pandas as pd
 
 random.seed(42)
 
@@ -81,6 +83,82 @@ class MRIDataset(Dataset):
         if self.transform:
             x = self.transform(x)
         return x.unsqueeze(0)
+
+
+def load_scan(path):
+    """
+    Loads scans from a folder and into a list.
+
+    Parameters: path (Folder path)
+
+    Returns: slices (List of slices)
+    """
+    slices = [pydicom.read_file(path + '/' + s) for s in os.listdir(path)]
+    slices.sort(key=lambda x: int(x.InstanceNumber))
+
+    try:
+        slice_thickness = np.abs(slices[0].ImagePositionPatient[2] - slices[1].ImagePositionPatient[2])
+    except:
+        slice_thickness = np.abs(slices[0].SliceLocation - slices[1].SliceLocation)
+
+    for s in slices:
+        s.SliceThickness = slice_thickness
+
+    return slices
+
+
+def get_pixels_hu(scans):
+    """
+    Converts raw images to Hounsfield Units (HU).
+
+    Parameters: scans (Raw images)
+
+    Returns: image (NumPy array)
+    """
+
+    image = np.stack([s.pixel_array for s in scans])
+    image = image.astype(np.int16)
+
+    # Since the scanning equipment is cylindrical in nature and image output is square,
+    # we set the out-of-scan pixels to 0
+    image[image == -2000] = 0
+
+    # HU = m*P + b
+    intercept = scans[0].RescaleIntercept
+    slope = scans[0].RescaleSlope
+
+    if slope != 1:
+        image = slope * image.astype(np.float64)
+        image = image.astype(np.int16)
+
+    image += np.int16(intercept)
+
+    return np.array(image, dtype=np.int16)
+
+
+class CTDataset(Dataset):
+    def __init__(self, path, transform=None, size=32, device='cuda'):
+        self.path = path
+        self.device = device
+        self.size = size
+        self.samples = os.listdir(path)
+        random.shuffle(self.samples)
+        self.transform = transform
+        self.labels = pd.read_csv('/run/media/simon/DATA&STUFF/data/train.csv')
+        self.max_fvc = max(self.labels['FVC'].to_list())
+        self.labels['FVC'] /= self.max_fvc
+
+    def __len__(self):
+        return len(self.samples)
+
+    def __getitem__(self, idx):
+        x = torch.load(self.path + '/' + self.samples[idx])
+        # x.requires_grad = False
+        if self.transform:
+            x = self.transform(x)
+        patient = self.labels['Patient'].to_list().index(self.samples[idx])
+        return patient, x.unsqueeze(0), torch.Tensor(
+            [float(self.labels['FVC'][patient])])
 
 
 class MRIDatasetClassifier(Dataset):
@@ -242,7 +320,9 @@ def save_checkpoint(model,
                     best_loss=-1,
                     has_dense=True,
                     name="vae_3dcnn",
-                    model_name=Autoencoder3DCNN
+                    model_name=Autoencoder3DCNN,
+                    is_bayesian=True,
+                    n_classes=1
                     ):
     if torch.cuda.is_available():
         device = 'cuda'
@@ -326,26 +406,27 @@ def save_checkpoint(model,
                                             )
     elif model_type == "classif":
         model_for_saving = ConvResnet3D(maxpool,
-                                        in_channels,
-                                        out_channels,
-                                        kernel_sizes,
-                                        strides,
-                                        dilatations,
-                                        padding,
-                                        batchnorm,
-                                        n_classes=z_dim,
-                                        activation=torch.nn.ReLU,
-                                        n_res=3,
-                                        gated=True,
-                                        has_dense=True,
-                                        resblocks=False
-                                        )
+                             in_channels,
+                             out_channels,
+                             kernel_sizes,
+                             strides,
+                             dilatations,
+                             padding,
+                             batchnorm,
+                             n_classes,
+                             is_bayesian=is_bayesian,
+                             activation=torch.nn.ReLU,
+                             n_res=n_res,
+                             gated=gated,
+                             has_dense=has_dense,
+                             resblocks=resblocks,
+                             )
     model_for_saving.load_state_dict(model.state_dict())
     torch.save({'model': model_for_saving,
                 'losses': losses,
                 'best_loss': best_loss,
-                'kl_divs': kl_divs,
-                'losses_recon': losses_recon,
+                # 'kl_divs': kl_divs,
+                # 'losses_recon': losses_recon,
                 'epoch': epoch,
                 # 'optimizer': optimizer.state_dict(),
                 'learning_rate': learning_rate}, checkpoint_path + '/' + name)

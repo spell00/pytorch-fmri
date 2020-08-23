@@ -6,7 +6,7 @@ import json
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
 from fmri.utils.CycleAnnealScheduler import CycleScheduler
-from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDatasetClassifier
+from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDatasetClassifier, CTDataset
 from fmri.utils.transform_3d import Normalize, RandomRotation3D, ColorJitter3D, Flip90, Flip180, Flip270, XFlip, YFlip, \
     ZFlip, RandomAffine3D
 from fmri.models.unsupervised.VAE_3DCNN import Autoencoder3DCNN
@@ -17,7 +17,7 @@ from torchvision import transforms
 from ax.service.managed_loop import optimize
 import random
 from fmri.utils.activations import Swish
-
+from tqdm import tqdm
 import os
 
 output_directory = "checkpoints"
@@ -318,13 +318,12 @@ class Train:
             torchvision.transforms.Normalize(mean=(self.mean), std=(self.std)),
             Normalize()
         ])
-        all_set = MRIDatasetClassifier(self.path, transform=train_transform)
+        all_set = CTDataset(self.path, transform=train_transform)
         spliter = validation_spliter(all_set, cv=self.cross_validation)
 
         epoch_offset = max(1, epoch)
 
         for cv in range(self.cross_validation):
-            # pbar = tqdm(total=len(train_loader))
             model.random_init()
             best_loss = -1
             valid_set, train_set = spliter.__next__()
@@ -418,8 +417,10 @@ class Train:
                     break
                 best_epoch = False
                 model.train()
+                # pbar = tqdm(total=len(train_loader))
 
                 for i, batch in enumerate(train_loader):
+                    # pbar.update(1)
                     model.zero_grad()
                     images, _ = batch
                     images = torch.autograd.Variable(images).to(device)
@@ -640,10 +641,10 @@ if __name__ == "__main__":
     gated = False
     resblocks = True
     checkpoint_path = "checkpoints"
-    path = '/home/simon/loris-api-presentation/fmri/'
+    path = '/run/media/simon/DATA&STUFF/data/train_32x32/'
 
     n_epochs = 10000
-    save = False
+    save = True
     training = Train(in_channels=in_channels,
                      in_channels2=in_channels2,
                      out_channels=out_channels,

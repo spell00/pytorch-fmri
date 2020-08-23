@@ -10,3 +10,5 @@ pandas
 sklearn
 scikit-learn
 setuptools
+pydicom
+pillow
