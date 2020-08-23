@@ -210,7 +210,8 @@ class Train:
                                         resblocks=self.resblocks,
                                         h_last=None,
                                         n_elements=None,
-                                        n_flows=None
+                                        n_flows=None,
+                                        predict=False
                                         )
         model = model.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
@@ -248,7 +249,8 @@ class Train:
         ])
         """
         """
-        all_set = CTDataset(self.path, transform=train_transform, size=self.size)
+        all_set = CTDataset(self.path, '/run/media/simon/DATA&STUFF/data/train.csv',
+                            transform=train_transform, size=self.size)
         spliter = validation_spliter(all_set, cv=self.cross_validation)
 
         print("Training Started on device:", device)

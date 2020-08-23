@@ -215,6 +215,8 @@ class ConvResnet3D(nn.Module):
             x = self.maxpool(x)
 
         z = x.squeeze()
+        if len(z.shape) == 1:
+            z = z.unsqueeze(0)
         z = self.dense1(z)
         if self.batchnorm:
            if z.shape[0] != 1:

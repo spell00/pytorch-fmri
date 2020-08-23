@@ -137,14 +137,14 @@ def get_pixels_hu(scans):
 
 
 class CTDataset(Dataset):
-    def __init__(self, path, transform=None, size=32, device='cuda'):
+    def __init__(self, path, labels_path, transform=None, size=32, device='cuda'):
         self.path = path
         self.device = device
         self.size = size
         self.samples = os.listdir(path)
         random.shuffle(self.samples)
         self.transform = transform
-        self.labels = pd.read_csv('/run/media/simon/DATA&STUFF/data/train.csv')
+        self.labels = pd.read_csv(labels_path)
         self.max_fvc = max(self.labels['FVC'].to_list())
         self.labels['FVC'] /= self.max_fvc
 
@@ -156,9 +156,11 @@ class CTDataset(Dataset):
         # x.requires_grad = False
         if self.transform:
             x = self.transform(x)
-        patient = self.labels['Patient'].to_list().index(self.samples[idx])
-        return patient, x.unsqueeze(0), torch.Tensor(
-            [float(self.labels['FVC'][patient])])
+        patient_pos = self.labels['Patient'].to_list().index(self.samples[idx])
+        patient = self.labels['Patient'][patient_pos]
+        week = self.labels['Weeks'][patient_pos]
+        return "".join([patient, week]), x.unsqueeze(0), torch.Tensor(
+            [float(self.labels['FVC'][patient_pos])])
 
 
 class MRIDatasetClassifier(Dataset):
@@ -220,6 +222,7 @@ def load_checkpoint(checkpoint_path,
                     resblocks,
                     h_last,
                     n_elements,
+                    predict,
                     name="vae_1dcnn",
                     model_name=Autoencoder3DCNN
 
@@ -237,9 +240,9 @@ def load_checkpoint(checkpoint_path,
         "train": [],
         "valid": [],
     }
-    if checkpoint_path not in os.listdir():
+    if checkpoint_path not in os.listdir() and not predict:
         os.mkdir(checkpoint_path)
-    if name not in os.listdir(checkpoint_path):
+    if name not in os.listdir(checkpoint_path) and not predict:
         print("Creating checkpoint...")
         if save:
             save_checkpoint(model=model,
@@ -281,8 +284,13 @@ def load_checkpoint(checkpoint_path,
     # optimizer.load_state_dict(checkpoint_dict['optimizer'])
     model_for_loading = checkpoint_dict['model']
     model.load_state_dict(model_for_loading.state_dict())
-    losses_recon = checkpoint_dict['losses_recon']
-    kl_divs = checkpoint_dict['kl_divs']
+    try:
+        losses_recon = checkpoint_dict['losses_recon']
+        kl_divs = checkpoint_dict['kl_divs']
+    except:
+        losses_recon = None
+        kl_divs = None
+
     losses = checkpoint_dict['losses']
     print("Loaded checkpoint '{}' (epoch {})".format(checkpoint_path, epoch))
     return model, optimizer, epoch, losses, kl_divs, losses_recon, best_loss

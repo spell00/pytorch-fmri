@@ -181,7 +181,7 @@ class Predict:
         model, optimizer, \
         epoch, losses, \
         kl_divs, losses_recon, \
-        best_loss = load_checkpoint(checkpoint_path,
+        best_loss = load_checkpoint(self.checkpoint_path,
                                     model,
                                     self.maxpool,
                                     save=False,
@@ -206,22 +206,23 @@ class Predict:
                                     resblocks=resblocks,
                                     h_last=None,
                                     n_elements=None,
-                                    n_flows=None
+                                    n_flows=None,
+                                    predict=True
                                     )
         model = model.to(device)
 
-
-        test_set = CTDataset(self.path, transform=None, size=self.size)
+        test_set = CTDataset(self.path, '/run/media/simon/DATA&STUFF/data/test.csv',
+                             transform=None, size=self.size)
         test_loader = DataLoader(test_set,
                                  num_workers=0,
                                  shuffle=True,
-                                     batch_size=1,
-                                     pin_memory=False,
-                                     drop_last=True)
+                                 batch_size=1,
+                                 pin_memory=False,
+                                 drop_last=True)
 
         # pbar = tqdm(total=len(train_loader))
-        f = open("demofile2.txt", "a")
-        f.write("Patient_Week,FVC,Confidence")
+        f = open("demofile2.txt", "w")
+        f.write("Patient_Week,FVC,Confidence\n")
         for i, batch in enumerate(test_loader):
             #    pbar.update(1)
             model.zero_grad()
@@ -238,8 +239,9 @@ class Predict:
 
             fvc = l1_loss.item() * test_set.max_fvc
             confidence = confidence * test_set.max_fvc
-            f.write(",".join([patient, fvc, confidence]))
-
+            f.write(",".join([patient[0], str(int(fvc)), str(int(confidence[0][0]))]))
+            f.write('\n')
+        f.close()
 
 
 if __name__ == "__main__":
@@ -270,9 +272,9 @@ if __name__ == "__main__":
         'niter': 1000,
         'scheduler': 'CycleScheduler',
         'optimizer': 'adamw',
-        'momentum': 0.9525840232148767,
-        'learning_rate': 2.000000e-04,
-        'weight_decay': 5.000000e-03,
+        'momentum': 0.9723667767830193,
+        'learning_rate': 4.000000e-04,
+        'weight_decay': 1.000000e-05,
 
     }
     predict = Predict(in_channels=in_channels,
