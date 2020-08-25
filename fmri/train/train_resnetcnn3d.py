@@ -341,7 +341,7 @@ class Train:
                     train_log_gauss += [rv.pdf(mu.detach().cpu().numpy())]
 
                     # loss = criterion(preds, targets.cuda()) # - 0.01 * log_gaussian(preds.view(-1), mu.view(-1), log_var.view(-1))
-                    loss = -log_gaussian(targets.view(-1), mu.view(-1), torch.exp(log_var.view(-1)))
+                    loss = log_gaussian(targets.view(-1), mu.view(-1), torch.exp(log_var.view(-1))) ** 2
                     #loss = torch.exp()
                     l1_loss = l1(mu, targets.cuda())
                     loss.backward()
@@ -385,7 +385,7 @@ class Train:
                     patient_info = patient_info.to(device)
                     _, mu, log_var = model(images, patient_info)
                     rv = norm(mu.detach().cpu().numpy(), np.exp(log_var.detach().cpu().numpy()))
-                    loss = -log_gaussian(targets.view(-1), mu.view(-1), torch.exp(log_var.view(-1)))
+                    loss = log_gaussian(targets.view(-1), mu.view(-1), torch.exp(log_var.view(-1))) ** 2
                     valid_losses += [loss.item()]
                     valid_log_gauss += [rv.pdf(mu.detach().cpu().numpy())]
                     l1_loss = l1(mu, targets.cuda())
