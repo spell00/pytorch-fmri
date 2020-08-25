@@ -33,6 +33,7 @@ else:
 
 class Train:
     def __init__(self,
+                 train_csv,
                  in_channels,
                  out_channels,
                  kernel_sizes,
@@ -63,7 +64,7 @@ class Train:
                  val_share=0.1,
                  cross_validation=5,
                  is_bayesian=True,
-                 random_node='output'
+                 random_node='output',
                  ):
         super().__init__()
         self.n_classes = n_classes
@@ -96,6 +97,7 @@ class Train:
         self.plot_perform = plot_perform
         self.cross_validation = cross_validation
         self.is_bayesian = is_bayesian
+        self.train_csv = train_csv
 
     def train(self, params):
         if torch.cuda.is_available():
@@ -249,7 +251,7 @@ class Train:
         ])
         """
         """
-        all_set = CTDataset(self.path, '/run/media/simon/DATA&STUFF/data/train.csv',
+        all_set = CTDataset(self.path, train_csv,
                             transform=train_transform, size=self.size)
         spliter = validation_spliter(all_set, cv=self.cross_validation)
 
@@ -502,7 +504,9 @@ if __name__ == "__main__":
 
     n_epochs = 500
     save = True
-    training = Train(in_channels=in_channels,
+    train_csv = '/run/media/simon/DATA&STUFF/data/train.csv'
+    training = Train(train_csv,
+                     in_channels=in_channels,
                      out_channels=out_channels,
                      kernel_sizes=kernel_sizes,
                      strides=strides,

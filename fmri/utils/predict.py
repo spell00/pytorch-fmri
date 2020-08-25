@@ -33,6 +33,7 @@ else:
 
 class Predict:
     def __init__(self,
+                 basedir,
                  in_channels,
                  out_channels,
                  kernel_sizes,
@@ -102,6 +103,7 @@ class Predict:
         self.train_labels_path = train_labels_path
         self.test_labels_path = test_labels_path
         self.submission_file = submission_file
+        self.basedir = basedir
 
     def predict(self, params):
         if torch.cuda.is_available():
@@ -233,11 +235,10 @@ class Predict:
                                  drop_last=False)
 
         # pbar = tqdm(total=len(train_loader))
-        f = open("submission.csv", "w")
+        f = open(self.basedir + "/submission.csv", "w")
         f.write("Patient_Week,FVC,Confidence\n")
         for i, batch in enumerate(test_loader):
             #    pbar.update(1)
-            model.zero_grad()
             patient, images, targets, patient_info = batch
             patient_info = patient_info.to(device)
 
@@ -245,14 +246,12 @@ class Predict:
             targets = targets.to(device)
 
             _, mu, log_var = model(images, patient_info)
-            rv = norm(mu.detach().cpu().numpy(), np.exp(log_var.detach().cpu().numpy()))
-            confidence = rv.pdf(mu.detach().cpu().numpy())
 
-            l1_loss = l1(mu, targets.cuda())
+            l1_loss = l1(mu * test_set.max_fvc, targets.cuda())
 
             fvc = l1_loss.item()
-            confidence = confidence
-            f.write(",".join([patient[0], str(int(fvc)), str(int(confidence[0][0]))]))
+            confidence = 2 * np.exp(np.sqrt(log_var.item())) * test_set.max_fvc
+            f.write(",".join([patient[0], str(int(fvc)), str(int(confidence))]))
             f.write('\n')
         f.close()
 
@@ -279,7 +278,7 @@ if __name__ == "__main__":
     checkpoint_path = "../train/checkpoints"
     train_path = '/run/media/simon/DATA&STUFF/data/train_32x32/'
     test_path = '/run/media/simon/DATA&STUFF/data/test_32x32/'
-
+    basedir = '../../'
     params = {
         'mom_range': 0,
         'n_res': 0,
@@ -291,7 +290,8 @@ if __name__ == "__main__":
         'weight_decay': 1.000000e-05,
 
     }
-    predict = Predict(in_channels=in_channels,
+    predict = Predict(basedir,
+                      in_channels=in_channels,
                       out_channels=out_channels,
                       kernel_sizes=kernel_sizes,
                       strides=strides,
