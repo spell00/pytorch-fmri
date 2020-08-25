@@ -10,7 +10,7 @@ from tensorboardX import SummaryWriter
 from fmri.models.utils.distributions import log_gaussian
 from fmri.utils.activations import Swish, Mish
 from fmri.utils.CycleAnnealScheduler import CycleScheduler
-from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDatasetClassifier, CTDataset
+from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDatasetClassifier, CTDatasetInfere
 from fmri.utils.transform_3d import Normalize, RandomRotation3D, ColorJitter3D, Flip90, Flip180, Flip270, XFlip, YFlip, \
     ZFlip, RandomAffine3D
 from fmri.models.supervised.resnetcnn3d import ConvResnet3D
@@ -39,7 +39,8 @@ class Predict:
                  strides,
                  dilatations,
                  padding,
-                 path,
+                 train_path,
+                 test_path,
                  n_classes,
                  init_func=torch.nn.init.kaiming_uniform_,
                  activation=torch.nn.GELU,
@@ -62,7 +63,10 @@ class Predict:
                  val_share=0.1,
                  cross_validation=5,
                  is_bayesian=True,
-                 random_node='output'
+                 random_node='output',
+                 train_labels_path='/run/media/simon/DATA&STUFF/data/train.csv',
+                 test_labels_path='/run/media/simon/DATA&STUFF/data/test.csv',
+                 submission_file='/run/media/simon/DATA&STUFF/data/sample_submission.csv'
                  ):
         super().__init__()
         self.n_classes = n_classes
@@ -84,7 +88,8 @@ class Predict:
         self.resblocks = resblocks
         self.maxpool = maxpool
         self.verbose = verbose
-        self.path = path
+        self.train_path = train_path
+        self.test_path = test_path
         self.size = size
         self.std = std
         self.mean = mean
@@ -94,6 +99,9 @@ class Predict:
         self.plot_perform = plot_perform
         self.cross_validation = cross_validation
         self.is_bayesian = is_bayesian
+        self.train_labels_path = train_labels_path
+        self.test_labels_path = test_labels_path
+        self.submission_file = submission_file
 
     def predict(self, params):
         if torch.cuda.is_available():
@@ -203,7 +211,7 @@ class Predict:
                                     dilatations_deconv=None,
                                     name=self.modelname,
                                     n_res=n_res,
-                                    resblocks=resblocks,
+                                    resblocks=self.resblocks,
                                     h_last=None,
                                     n_elements=None,
                                     n_flows=None,
@@ -211,14 +219,18 @@ class Predict:
                                     )
         model = model.to(device)
 
-        test_set = CTDataset(self.path, '/run/media/simon/DATA&STUFF/data/test.csv',
-                             transform=None, size=self.size)
+        test_set = CTDatasetInfere(train_path=self.train_path,
+                                   test_path=self.test_path,
+                                   train_labels_path=self.train_labels_path,
+                                   test_labels_path=self.test_labels_path,
+                                   submission_file=self.submission_file,
+                                   size=self.size)
         test_loader = DataLoader(test_set,
                                  num_workers=0,
-                                 shuffle=True,
+                                 shuffle=False,
                                  batch_size=1,
                                  pin_memory=False,
-                                 drop_last=True)
+                                 drop_last=False)
 
         # pbar = tqdm(total=len(train_loader))
         f = open("submission.csv", "w")
@@ -226,19 +238,20 @@ class Predict:
         for i, batch in enumerate(test_loader):
             #    pbar.update(1)
             model.zero_grad()
-            patient, images, targets = batch
+            patient, images, targets, patient_info = batch
+            patient_info = patient_info.to(device)
 
             images = images.to(device)
             targets = targets.to(device)
 
-            _, mu, log_var = model(images)
+            _, mu, log_var = model(images, patient_info)
             rv = norm(mu.detach().cpu().numpy(), np.exp(log_var.detach().cpu().numpy()))
             confidence = rv.pdf(mu.detach().cpu().numpy())
 
             l1_loss = l1(mu, targets.cuda())
 
-            fvc = l1_loss.item() * test_set.max_fvc
-            confidence = confidence * test_set.max_fvc
+            fvc = l1_loss.item()
+            confidence = confidence
             f.write(",".join([patient[0], str(int(fvc)), str(int(confidence[0][0]))]))
             f.write('\n')
         f.close()
@@ -251,20 +264,21 @@ if __name__ == "__main__":
     random.seed(10)
 
     size = 32
-    in_channels = [1, 256, 256, 256, 256]
-    out_channels = [256, 256, 256, 256, 256]
+    in_channels = [1, 256, 256, 512, 1024]
+    out_channels = [256, 256, 512, 1024, 1024]
     kernel_sizes = [3, 3, 3, 3, 3]
     strides = [1, 1, 1, 1, 1]
     dilatations = [1, 1, 1, 1, 1]
     paddings = [1, 1, 1, 1, 1]
-    bs = 16
+    bs = 8
     maxpool = 2
     has_dense = True
     batchnorm = True
     gated = False
     resblocks = False
     checkpoint_path = "../train/checkpoints"
-    path = '/run/media/simon/DATA&STUFF/data/test_32x32/'
+    train_path = '/run/media/simon/DATA&STUFF/data/train_32x32/'
+    test_path = '/run/media/simon/DATA&STUFF/data/test_32x32/'
 
     params = {
         'mom_range': 0,
@@ -282,7 +296,8 @@ if __name__ == "__main__":
                       kernel_sizes=kernel_sizes,
                       strides=strides,
                       dilatations=dilatations,
-                      path=path,
+                      train_path=train_path,
+                      test_path=test_path,
                       padding=paddings,
                       batch_size=bs,
                       checkpoint_path=checkpoint_path,

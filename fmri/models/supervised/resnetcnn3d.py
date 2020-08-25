@@ -181,8 +181,8 @@ class ConvResnet3D(nn.Module):
             self.bns += [nn.BatchNorm3d(num_features=outs)]
         self.dropout3d = nn.Dropout3d(0.5)
         self.dense1 = torch.nn.Linear(in_features=out_channels[-1], out_features=32)
-        self.dense2 = torch.nn.Linear(in_features=32, out_features=n_classes)
         self.dense1_bn = nn.BatchNorm1d(num_features=32)
+        self.dense2 = torch.nn.Linear(in_features=32 + 5, out_features=n_classes)  # 5 parameters added here
         self.dense2_bn = nn.BatchNorm1d(num_features=n_classes)
         self.dropout = nn.Dropout(0.5)
         self.log_softmax = torch.nn.functional.log_softmax
@@ -195,7 +195,7 @@ class ConvResnet3D(nn.Module):
                 if m.bias is not None:
                     m.bias.data.zero_()
 
-    def forward(self, x):
+    def forward(self, x, patient_info):
         j = 0
         for i in range(len(self.conv_layers)):
             if self.resblocks and i != 0:
@@ -223,6 +223,7 @@ class ConvResnet3D(nn.Module):
                z = self.dense1_bn(z)
         z = self.activation(z)
         z = self.dropout(z)
+        z = torch.cat([z, patient_info], dim=1)
         z = self.dense2(z)
         z = torch.sigmoid_(z)
         if self.is_bayesian:

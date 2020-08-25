@@ -159,8 +159,73 @@ class CTDataset(Dataset):
         patient_pos = self.labels['Patient'].to_list().index(self.samples[idx])
         patient = self.labels['Patient'][patient_pos]
         week = self.labels['Weeks'][patient_pos]
-        return "".join([patient, week]), x.unsqueeze(0), torch.Tensor(
-            [float(self.labels['FVC'][patient_pos])])
+        smokerStatus = self.labels['SmokingStatus'][patient_pos]
+        if smokerStatus == 'Never smoked':
+            smokerStatus = 0
+        elif smokerStatus == 'Ex-smoker':
+            smokerStatus = 0.5
+        elif smokerStatus == 'Currently smokes':
+            smokerStatus = 1
+        percent = self.labels['Percent'][patient_pos]
+        age = self.labels['Age'][patient_pos]
+        sex = self.labels['Sex'][patient_pos]
+        if sex == 'Male':
+            sex = 0
+        elif sex == 'Female':
+            sex = 1
+        return "_".join([patient, str(week)]), \
+               x.unsqueeze(0), \
+               torch.Tensor([float(self.labels['FVC'][patient_pos])]), \
+               torch.Tensor([week, smokerStatus, percent, age, sex])
+
+class CTDatasetInfere(Dataset):
+    def __init__(self, train_path, test_path, train_labels_path, test_labels_path,
+                 submission_file, size=32, device='cuda'):
+        self.train_path = train_path
+        self.test_path = test_path
+        self.device = device
+        self.size = size
+        self.train_labels = pd.read_csv(train_labels_path)
+        self.test_labels = pd.read_csv(test_labels_path)
+        self.submission = pd.read_csv(submission_file)
+        self.labels = pd.concat([self.train_labels, self.test_labels])
+        self.group = ['train_32x32' for _ in range(self.train_labels.__len__())] + ['test_32x32' for _ in range(self.test_labels.__len__())]
+        self.train_max_fvc = max(self.train_labels['FVC'].to_list())
+        self.test_max_fvc = max(self.test_labels['FVC'].to_list())
+        self.train_labels['FVC'] /= self.train_max_fvc
+        self.test_labels['FVC'] /= self.test_max_fvc
+        self.max_fvc = max(self.train_max_fvc, self.test_max_fvc)
+        self.samples = [str(p) + '_' + str(w) for p, w in zip(self.labels['Patient'], self.labels['Weeks'])]
+        self.labels['Patient_Week'] = self.samples
+    def __len__(self):
+        return len(self.submission['Patient_Week'])
+
+    def __getitem__(self, idx):
+        submission = self.submission['Patient_Week'][idx]
+        id, week = submission.split('_')
+        patient_pos = list(self.labels['Patient']).index(id)
+        path = '/run/media/simon/DATA&STUFF/data/' + self.group[patient_pos]
+        x = torch.load(path + '/' + id)
+        patient = self.labels['Patient'][patient_pos]
+        week = self.labels['Weeks'][patient_pos]
+        smokerStatus = self.labels['SmokingStatus'][patient_pos]
+        if smokerStatus == 'Never smoked':
+            smokerStatus = 0
+        elif smokerStatus == 'Ex-smoker':
+            smokerStatus = 0.5
+        elif smokerStatus == 'Currently smokes':
+            smokerStatus = 1
+        percent = self.labels['Percent'][patient_pos]
+        age = self.labels['Age'][patient_pos]
+        sex = self.labels['Sex'][patient_pos]
+        if sex == 'Male':
+            sex = 0
+        elif sex == 'Female':
+            sex = 1
+        return "_".join([patient, str(week)]), \
+               x.unsqueeze(0), \
+               torch.Tensor([float(self.labels['FVC'][patient_pos])]), \
+               torch.Tensor([week, smokerStatus, percent, age, sex])
 
 
 class MRIDatasetClassifier(Dataset):

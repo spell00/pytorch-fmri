@@ -329,12 +329,12 @@ class Train:
                 for i, batch in enumerate(train_loader):
                     #    pbar.update(1)
                     model.zero_grad()
-                    _, images, targets = batch
-
+                    _, images, targets, patient_info = batch
                     images = images.to(device)
                     targets = targets.to(device)
+                    patient_info = patient_info.to(device)
 
-                    _, mu, log_var = model(images)
+                    _, mu, log_var = model(images, patient_info)
                     rv = norm(mu.detach().cpu().numpy(), np.exp(log_var.detach().cpu().numpy()))
                     train_log_gauss += [rv.pdf(mu.detach().cpu().numpy())]
 
@@ -377,10 +377,11 @@ class Train:
                 # pbar = tqdm(total=len(valid_loader))
                 for i, batch in enumerate(valid_loader):
                     #    pbar.update(1)
-                    _, images, targets = batch
+                    _, images, targets, patient_info = batch
                     images = images.to(device)
                     targets = targets.to(device)
-                    _, mu, log_var = model(images)
+                    patient_info = patient_info.to(device)
+                    _, mu, log_var = model(images, patient_info)
                     rv = norm(mu.detach().cpu().numpy(), np.exp(log_var.detach().cpu().numpy()))
                     loss = -log_gaussian(targets.view(-1), mu.view(-1), torch.exp(log_var.view(-1)))
                     valid_losses += [loss.item()]
@@ -474,7 +475,7 @@ class Train:
             if self.verbose > 0:
                 print('BEST LOSS :', best_loss)
             best_losses += [best_loss]
-        return best_losses
+        return np.mean(best_losses)
 
 
 if __name__ == "__main__":
@@ -484,13 +485,13 @@ if __name__ == "__main__":
     random.seed(10)
 
     size = 32
-    in_channels = [1, 256, 256, 256, 256]
-    out_channels = [256, 256, 256, 256, 256]
+    in_channels = [1, 256, 256, 512, 1024]
+    out_channels = [256, 256, 512, 1024, 1024]
     kernel_sizes = [3, 3, 3, 3, 3]
     strides = [1, 1, 1, 1, 1]
     dilatations = [1, 1, 1, 1, 1]
     paddings = [1, 1, 1, 1, 1]
-    bs = 16
+    bs = 8
     maxpool = 2
     has_dense = True
     batchnorm = True
@@ -499,7 +500,7 @@ if __name__ == "__main__":
     checkpoint_path = "checkpoints"
     path = '/run/media/simon/DATA&STUFF/data/train_32x32/'
 
-    n_epochs = 10000
+    n_epochs = 500
     save = True
     training = Train(in_channels=in_channels,
                      out_channels=out_channels,
@@ -517,8 +518,8 @@ if __name__ == "__main__":
                      batchnorm=batchnorm,
                      save=save,
                      maxpool=maxpool,
-                     activation=torch.nn.ReLU,
-                     init_func=torch.nn.init.xavier_uniform_,
+                     activation=Swish,
+                     init_func=torch.nn.init.kaiming_uniform_,
                      n_classes=1,
                      epochs_per_print=10,
                      size=size
@@ -527,13 +528,13 @@ if __name__ == "__main__":
         parameters=[
             {"name": "mom_range", "type": "choice", "values": [0, 0]},
             {"name": "niter", "type": "choice", "values": [1000, 1000]},
-            {"name": "n_res", "type": "range", "bounds": [0, 1]},
+            {"name": "n_res", "type": "range", "bounds": [0, 10]},
             {"name": "scheduler", "type": "choice", "values":
                 ['CycleScheduler', 'CycleScheduler']},
             {"name": "optimizer", "type": "choice", "values": ['adamw', 'adamw']},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "momentum", "type": "range", "bounds": [0.9, 1.]},
-            {"name": "learning_rate", "type": "range", "bounds": [1e-4, 1e-3], "log_scale": True},
+            {"name": "learning_rate", "type": "range", "bounds": [1e-3, 1e-1], "log_scale": True},
         ],
         evaluation_function=training.train,
         objective_name='loss',
