@@ -150,6 +150,7 @@ class Train:
                              self.padding,
                              self.batchnorm,
                              self.n_classes,
+                             max_fvc=None,
                              is_bayesian=self.is_bayesian,
                              activation=torch.nn.ReLU,
                              n_res=n_res,
@@ -254,7 +255,7 @@ class Train:
         all_set = CTDataset(self.path, train_csv,
                             transform=train_transform, size=self.size)
         spliter = validation_spliter(all_set, cv=self.cross_validation)
-
+        model.max_fvc = all_set.max_fvc
         print("Training Started on device:", device)
         best_losses = []
         for cv in range(self.cross_validation):
@@ -302,6 +303,10 @@ class Train:
                 "train": [],
                 "valid": [],
             }
+            vars = {
+                "train": [],
+                "valid": [],
+            }
             accuracies = {
                 "train": [],
                 "valid": [],
@@ -318,6 +323,8 @@ class Train:
             valid_losses = []
             train_log_gauss = []
             valid_log_gauss = []
+            train_log_var = []
+            valid_log_var = []
             valid_accuracy = []
             for epoch in range(self.epochs):
                 if early_stop_counter == 100:
@@ -339,15 +346,15 @@ class Train:
                     _, mu, log_var = model(images, patient_info)
                     rv = norm(mu.detach().cpu().numpy(), np.exp(log_var.detach().cpu().numpy()))
                     train_log_gauss += [rv.pdf(mu.detach().cpu().numpy())]
-
+                    train_log_var += [np.exp(log_var.detach().cpu().numpy()) * model.max_fvc]
                     # loss = criterion(preds, targets.cuda()) # - 0.01 * log_gaussian(preds.view(-1), mu.view(-1), log_var.view(-1))
-                    loss = log_gaussian(targets.view(-1), mu.view(-1), torch.exp(log_var.view(-1))) ** 2
+                    loss = -log_gaussian(targets.view(-1), mu.view(-1), torch.exp(log_var.view(-1)))
                     #loss = torch.exp()
                     l1_loss = l1(mu, targets.cuda())
                     loss.backward()
 
-                    accuracy = l1_loss.item() * all_set.max_fvc
-                    train_accuracy += [accuracy]
+                    accuracy = l1_loss.item()
+                    train_accuracy += [accuracy * model.max_fvc]
 
                     train_losses += [loss.item()]
 
@@ -361,19 +368,23 @@ class Train:
                     losses["train"] += [np.mean(train_losses) / self.batch_size]
                     accuracies["train"] += [np.mean(train_accuracy)]
                     log_gaussians["train"] += [np.mean(train_log_gauss)]
+                    vars['train'] += [np.mean(train_log_var)]
                     if self.verbose > 1:
                         print("Epoch: {}:\t"
                               "Train Loss: {:.5f} , "
                               "Accuracy: {:.3f} , "
                               "confidence: {:.3f} , "
+                              "Vars: {:.3f} "
                               .format(epoch,
                                       losses["train"][-1],
                                       accuracies["train"][-1],
-                                      log_gaussians["train"][-1]
+                                      log_gaussians["train"][-1],
+                                      np.sqrt(vars["train"][-1])
                                       ))
                     train_losses = []
                     train_accuracy = []
                     train_log_gauss = []
+                    train_log_var = []
 
                 model.eval()
                 # pbar = tqdm(total=len(valid_loader))
@@ -385,13 +396,14 @@ class Train:
                     patient_info = patient_info.to(device)
                     _, mu, log_var = model(images, patient_info)
                     rv = norm(mu.detach().cpu().numpy(), np.exp(log_var.detach().cpu().numpy()))
-                    loss = log_gaussian(targets.view(-1), mu.view(-1), torch.exp(log_var.view(-1))) ** 2
+                    loss = -log_gaussian(targets.view(-1), mu.view(-1), torch.exp(log_var.view(-1)))
                     valid_losses += [loss.item()]
                     valid_log_gauss += [rv.pdf(mu.detach().cpu().numpy())]
+                    valid_log_var += [np.exp(log_var.detach().cpu().numpy()) * model.max_fvc]
                     l1_loss = l1(mu, targets.cuda())
 
-                    accuracy = l1_loss.item() * all_set.max_fvc
-                    valid_accuracy += [accuracy]
+                    accuracy = l1_loss.item()
+                    valid_accuracy += [accuracy * model.max_fvc]
                     logger.add_scalar('training loss', loss.item(), i + len(train_loader) * epoch)
                 if scheduler == "ReduceLROnPlateau":
                     if epoch > 25:
@@ -400,15 +412,18 @@ class Train:
                     losses["valid"] += [np.mean(valid_losses) / 2]
                     accuracies["valid"] += [np.mean(valid_accuracy)]
                     log_gaussians["valid"] += [np.mean(valid_log_gauss)]
+                    vars['valid'] += [np.mean(valid_log_var)]
                     if self.verbose > 0:
                         print("Epoch: {}:\t"
                               "Valid Loss: {:.5f} , "
                               "Accuracy: {:.3f} "
                               "confidence: {:.3f} "
+                              "Vars: {:.3f} "
                               .format(epoch,
                                       losses["valid"][-1],
                                       accuracies["valid"][-1],
-                                      log_gaussians["valid"][-1]
+                                      log_gaussians["valid"][-1],
+                                      np.sqrt(vars['valid'][-1]),
                                       )
                               )
                     if self.verbose > 1:
@@ -418,6 +433,7 @@ class Train:
                     valid_losses = []
                     valid_accuracy = []
                     valid_log_gauss = []
+                    valid_log_var = []
 
                 mode = 'valid'
                 if epoch > 1 and epoch % self.epochs_per_print == 0:
@@ -486,24 +502,26 @@ if __name__ == "__main__":
 
     random.seed(10)
 
-    size = 32
-    in_channels = [1, 256, 256, 512, 1024]
-    out_channels = [256, 256, 512, 1024, 1024]
-    kernel_sizes = [3, 3, 3, 3, 3]
-    strides = [1, 1, 1, 1, 1]
-    dilatations = [1, 1, 1, 1, 1]
-    paddings = [1, 1, 1, 1, 1]
+    size = 64
+    in_channels = [1, 32, 64, 128, 256, 512]
+    out_channels = [32, 64, 128, 256, 512, 512]
+    kernel_sizes = [3, 3, 3, 3, 3, 3]
+    strides = [1, 1, 1, 1, 1, 1]
+    dilatations = [1, 1, 1, 1, 1, 1]
+    paddings = [1, 1, 1, 1, 1, 1]
     bs = 8
     maxpool = 2
     has_dense = True
     batchnorm = True
-    gated = False
-    resblocks = False
+    gated = True
+    resblocks = True
     checkpoint_path = "checkpoints"
     path = '/run/media/simon/DATA&STUFF/data/train_32x32/'
+    basedir = '/run/media/simon/DATA&STUFF/data/'
+    path = basedir + '/train' + '_' + str(size) + 'x' + str(size) + '/'
 
     n_epochs = 500
-    save = True
+    save = False
     train_csv = '/run/media/simon/DATA&STUFF/data/train.csv'
     training = Train(train_csv,
                      in_channels=in_channels,
@@ -522,7 +540,7 @@ if __name__ == "__main__":
                      batchnorm=batchnorm,
                      save=save,
                      maxpool=maxpool,
-                     activation=Swish,
+                     activation=torch.nn.ReLU,
                      init_func=torch.nn.init.kaiming_uniform_,
                      n_classes=1,
                      epochs_per_print=10,
@@ -532,13 +550,13 @@ if __name__ == "__main__":
         parameters=[
             {"name": "mom_range", "type": "choice", "values": [0, 0]},
             {"name": "niter", "type": "choice", "values": [1000, 1000]},
-            {"name": "n_res", "type": "range", "bounds": [0, 10]},
+            {"name": "n_res", "type": "range", "bounds": [2, 10]},
             {"name": "scheduler", "type": "choice", "values":
                 ['CycleScheduler', 'CycleScheduler']},
             {"name": "optimizer", "type": "choice", "values": ['adamw', 'adamw']},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "momentum", "type": "range", "bounds": [0.9, 1.]},
-            {"name": "learning_rate", "type": "range", "bounds": [1e-3, 1e-1], "log_scale": True},
+            {"name": "learning_rate", "type": "range", "bounds": [1e-1, 1e-0], "log_scale": True},
         ],
         evaluation_function=training.train,
         objective_name='loss',

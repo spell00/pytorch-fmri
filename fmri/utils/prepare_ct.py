@@ -83,12 +83,16 @@ import numpy as np
 from tqdm import tqdm
 
 if __name__ == "__main__":
-    new_data_dir = '/run/media/simon/DATA&STUFF/data/test_32x32/'
-    data_dir = '/run/media/simon/DATA&STUFF/data/test/'
+    size = 64
+    basedir = '/run/media/simon/DATA&STUFF/data/'
+    group = 'train'
+    new_data_dir = basedir + '/' + group + '_' + str(size) + 'x' + str(size) + '/'
+    if new_data_dir not in '/'.join([basedir, group]):
+        os.mkdir(new_data_dir)
+    data_dir = '/run/media/simon/DATA&STUFF/data/' + group + '/'
 
     ct_folders = os.listdir(data_dir)
 
-    size = 32
     pbar = tqdm(total=len(ct_folders))
     bad = 0
     for i, fname in enumerate(ct_folders):
