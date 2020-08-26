@@ -252,7 +252,7 @@ class Train:
         ])
         """
         """
-        all_set = CTDataset(self.path, train_csv,
+        all_set = CTDataset(self.path, self.train_csv,
                             transform=train_transform, size=self.size)
         spliter = validation_spliter(all_set, cv=self.cross_validation)
         model.max_fvc = all_set.max_fvc
