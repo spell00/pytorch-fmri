@@ -348,7 +348,9 @@ class Train:
                     train_log_gauss += [rv.pdf(mu.detach().cpu().numpy())]
                     train_log_var += [np.exp(log_var.detach().cpu().numpy()) * model.max_fvc]
                     # loss = criterion(preds, targets.cuda()) # - 0.01 * log_gaussian(preds.view(-1), mu.view(-1), log_var.view(-1))
-                    loss = -log_gaussian(targets.view(-1), mu.view(-1), torch.exp(log_var.view(-1)))
+                    loss = -log_gaussian(targets.view(-1).type(torch.FloatTensor).to(device),
+                                         mu.view(-1).type(torch.FloatTensor).to(device),
+                                         torch.exp(log_var.view(-1).type(torch.FloatTensor).to(device)))
                     #loss = torch.exp()
                     l1_loss = l1(mu, targets.cuda())
                     loss.backward()
@@ -396,7 +398,9 @@ class Train:
                     patient_info = patient_info.to(device)
                     _, mu, log_var = model(images, patient_info)
                     rv = norm(mu.detach().cpu().numpy(), np.exp(log_var.detach().cpu().numpy()))
-                    loss = -log_gaussian(targets.view(-1), mu.view(-1), torch.exp(log_var.view(-1)))
+                    loss = -log_gaussian(targets.view(-1).type(torch.FloatTensor).to(device),
+                                         mu.view(-1).type(torch.FloatTensor).to(device),
+                                         torch.exp(log_var.view(-1).type(torch.FloatTensor).to(device)))
                     valid_losses += [loss.item()]
                     valid_log_gauss += [rv.pdf(mu.detach().cpu().numpy())]
                     valid_log_var += [np.exp(log_var.detach().cpu().numpy()) * model.max_fvc]
