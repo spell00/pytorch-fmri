@@ -347,13 +347,13 @@ class Train:
                     rv = norm(mu.detach().cpu().numpy(), np.exp(log_var.detach().cpu().numpy()))
                     train_log_gauss += [rv.pdf(mu.detach().cpu().numpy())]
                     train_log_var += [np.exp(log_var.detach().cpu().numpy()) * model.max_fvc]
-                    # loss = criterion(preds, targets.cuda()) # - 0.01 * log_gaussian(preds.view(-1), mu.view(-1), log_var.view(-1))
+                    # loss = criterion(preds, targets.to(device)) # - 0.01 * log_gaussian(preds.view(-1), mu.view(-1), log_var.view(-1))
                     loss = -log_gaussian(targets.view(-1).type(torch.FloatTensor).to(device),
                                          mu.view(-1).type(torch.FloatTensor).to(device),
                                          torch.exp(log_var.view(-1).type(torch.FloatTensor).to(device)))
                     #loss = torch.exp()
-                    l1_loss = l1(mu, targets.cuda())
                     loss.backward()
+                    l1_loss = l1(mu.to(device), targets.to(device))
 
                     accuracy = l1_loss.item()
                     train_accuracy += [accuracy * model.max_fvc]
@@ -404,7 +404,7 @@ class Train:
                     valid_losses += [loss.item()]
                     valid_log_gauss += [rv.pdf(mu.detach().cpu().numpy())]
                     valid_log_var += [np.exp(log_var.detach().cpu().numpy()) * model.max_fvc]
-                    l1_loss = l1(mu, targets.cuda())
+                    l1_loss = l1(mu, targets.to(device))
 
                     accuracy = l1_loss.item()
                     valid_accuracy += [accuracy * model.max_fvc]
