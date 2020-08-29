@@ -65,6 +65,7 @@ class Predict:
                  cross_validation=5,
                  is_bayesian=True,
                  max_fvc=0,
+                 n_kernels=1,
                  random_node='output',
                  train_labels_path='/run/media/simon/DATA&STUFF/data/train.csv',
                  test_labels_path='/run/media/simon/DATA&STUFF/data/test.csv',
@@ -72,6 +73,7 @@ class Predict:
                  ):
         super().__init__()
         self.max_fvc = max_fvc
+        self.n_kernels = n_kernels
         self.n_classes = n_classes
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -164,7 +166,8 @@ class Predict:
                              gated=self.gated,
                              has_dense=self.has_dense,
                              resblocks=self.resblocks,
-                             max_fvc=self.max_fvc
+                             max_fvc=self.max_fvc,
+                             n_kernels=self.n_kernels
                              ).to(device)
         l1 = nn.L1Loss()
         if optimizer_type == 'adamw':
