@@ -7,7 +7,6 @@ import json
 from scipy.stats import norm
 from torch.utils.data import DataLoader
 from tensorboardX import SummaryWriter
-from fmri.models.utils.distributions import log_gaussian
 from fmri.utils.activations import Swish, Mish
 from fmri.utils.CycleAnnealScheduler import CycleScheduler
 from fmri.utils.dataset import load_checkpoint, save_checkpoint, MRIDatasetClassifier, CTDataset
@@ -19,7 +18,7 @@ import torchvision
 from torchvision import transforms
 from ax.service.managed_loop import optimize
 import random
-
+import math
 import os
 
 import nibabel as nib
@@ -29,6 +28,25 @@ if torch.cuda.is_available():
     device = 'cuda'
 else:
     device = "cpu"
+
+
+def log_gaussian(x, mu, log_var):
+    """
+    Returns the log pdf of a normal distribution parametrised
+    by mu and log_var evaluated at x.
+
+    :param x: point to evaluate
+    :param mu: mean of distribution
+    :param log_var: log variance of distribution
+    :return: log N(x|µ,σ)
+    """
+    log_pdf = - 0.5 * torch.log(2 * torch.tensor(math.pi, requires_grad=True)) - log_var / 2 - (x - mu) ** 2 / (
+                2 * torch.exp(log_var))
+    return torch.sum(log_pdf, dim=-1)
+
+
+def log_gaussian(x, mu, sigma):
+    return -0.5 * torch.log(2 * torch.tensor(math.pi, requires_grad=True)) - torch.log(torch.abs_(sigma)) - (x - mu) ** 2 / (2 * sigma ** 2)
 
 
 class Train:
@@ -43,6 +61,7 @@ class Train:
                  padding,
                  path,
                  n_classes,
+                 n_kernels,
                  init_func=torch.nn.init.kaiming_uniform_,
                  activation=torch.nn.GELU,
                  batch_size=8,
@@ -98,6 +117,7 @@ class Train:
         self.cross_validation = cross_validation
         self.is_bayesian = is_bayesian
         self.train_csv = train_csv
+        self.n_kernels = n_kernels
 
     def train(self, params):
         if torch.cuda.is_available():
@@ -151,6 +171,7 @@ class Train:
                              self.batchnorm,
                              self.n_classes,
                              max_fvc=None,
+                             n_kernels=self.n_kernels,
                              is_bayesian=self.is_bayesian,
                              activation=torch.nn.ReLU,
                              n_res=n_res,
@@ -214,7 +235,8 @@ class Train:
                                         h_last=None,
                                         n_elements=None,
                                         n_flows=None,
-                                        predict=False
+                                        predict=False,
+                                        n_kernels=self.n_kernels
                                         )
         model = model.to(device)
         # t1 = torch.Tensor(np.load('/run/media/simon/DATA&STUFF/data/biology/arrays/t1.npy'))
@@ -232,13 +254,13 @@ class Train:
                 Flip270()
             ]),
             # ColorJitter3D(.1, .1, .1, .1),
-            #transforms.RandomChoice(
+            # transforms.RandomChoice(
             #    [
             #        RandomAffine3D(0, [.1, .1], [.1, .1], [.1, .1]),
             #        RandomAffine3D(1, [.1, .1], [.1, .1], [.1, .1]),
             #        RandomAffine3D(2, [.1, .1], [.1, .1], [.1, .1])
             #    ]
-            #),
+            # ),
             transforms.RandomChoice(
                 [
                     RandomRotation3D(25, 0),
@@ -323,8 +345,8 @@ class Train:
             valid_losses = []
             train_log_gauss = []
             valid_log_gauss = []
-            train_log_var = []
-            valid_log_var = []
+            train_var = []
+            valid_var = []
             valid_accuracy = []
             for epoch in range(self.epochs):
                 if early_stop_counter == 100:
@@ -340,20 +362,25 @@ class Train:
                     model.zero_grad()
                     _, images, targets, patient_info = batch
                     images = images.to(device)
-                    targets = targets.to(device)
+                    targets = targets.type(torch.FloatTensor).to(device)
                     patient_info = patient_info.to(device)
 
                     _, mu, log_var = model(images, patient_info)
+                    mu = mu.type(torch.FloatTensor).to(device)
+                    log_var = log_var.type(torch.FloatTensor).to(device)
+
                     rv = norm(mu.detach().cpu().numpy(), np.exp(log_var.detach().cpu().numpy()))
                     train_log_gauss += [rv.pdf(mu.detach().cpu().numpy())]
-                    train_log_var += [np.exp(log_var.detach().cpu().numpy()) * model.max_fvc]
                     # loss = criterion(preds, targets.to(device)) # - 0.01 * log_gaussian(preds.view(-1), mu.view(-1), log_var.view(-1))
-                    loss = -log_gaussian(targets.view(-1).type(torch.FloatTensor).to(device),
-                                         mu.view(-1).type(torch.FloatTensor).to(device),
-                                         torch.exp(log_var.view(-1).type(torch.FloatTensor).to(device)))
-                    #loss = torch.exp()
+                    loss = -log_gaussian(targets, mu, log_var) / self.batch_size
+                    loss = torch.sum(loss, 0)
+                    argmin = torch.argmin(loss)
+                    # print('argmin: ', argmin)
+                    loss = torch.mean(loss)
+                    # loss += criterion(mu[argmin], log_var[argmin])
+                    train_var += [np.exp(log_var[argmin].detach().cpu().numpy()) * model.max_fvc]
                     loss.backward()
-                    l1_loss = l1(mu.to(device), targets.to(device))
+                    l1_loss = l1(mu[argmin].to(device), targets.to(device))
 
                     accuracy = l1_loss.item()
                     train_accuracy += [accuracy * model.max_fvc]
@@ -370,13 +397,13 @@ class Train:
                     losses["train"] += [np.mean(train_losses) / self.batch_size]
                     accuracies["train"] += [np.mean(train_accuracy)]
                     log_gaussians["train"] += [np.mean(train_log_gauss)]
-                    vars['train'] += [np.mean(train_log_var)]
+                    vars['train'] += [np.mean(train_var)]
                     if self.verbose > 1:
                         print("Epoch: {}:\t"
                               "Train Loss: {:.5f} , "
                               "Accuracy: {:.3f} , "
-                              "confidence: {:.3f} , "
-                              "Vars: {:.3f} "
+                              "confidence: {:.9f} , "
+                              "Vars: {:.9f} "
                               .format(epoch,
                                       losses["train"][-1],
                                       accuracies["train"][-1],
@@ -386,7 +413,7 @@ class Train:
                     train_losses = []
                     train_accuracy = []
                     train_log_gauss = []
-                    train_log_var = []
+                    train_var = []
 
                 model.eval()
                 # pbar = tqdm(total=len(valid_loader))
@@ -398,13 +425,16 @@ class Train:
                     patient_info = patient_info.to(device)
                     _, mu, log_var = model(images, patient_info)
                     rv = norm(mu.detach().cpu().numpy(), np.exp(log_var.detach().cpu().numpy()))
-                    loss = -log_gaussian(targets.view(-1).type(torch.FloatTensor).to(device),
-                                         mu.view(-1).type(torch.FloatTensor).to(device),
-                                         torch.exp(log_var.view(-1).type(torch.FloatTensor).to(device)))
-                    valid_losses += [loss.item()]
+                    loss = -log_gaussian(targets.type(torch.FloatTensor).to(device),
+                                         mu.type(torch.FloatTensor).to(device),
+                                         torch.exp(log_var.type(torch.FloatTensor).to(device))) / self.batch_size
+                    loss = torch.sum(loss, 0)
+                    argmin = torch.argmin(loss)
+                    loss = torch.mean(loss)
+                    valid_losses += [np.exp(-loss.item())]
                     valid_log_gauss += [rv.pdf(mu.detach().cpu().numpy())]
-                    valid_log_var += [np.exp(log_var.detach().cpu().numpy()) * model.max_fvc]
-                    l1_loss = l1(mu, targets.to(device))
+                    valid_var += [np.exp(log_var[argmin].detach().cpu().numpy()) * model.max_fvc]
+                    l1_loss = l1(mu[argmin], targets.to(device))
 
                     accuracy = l1_loss.item()
                     valid_accuracy += [accuracy * model.max_fvc]
@@ -416,13 +446,13 @@ class Train:
                     losses["valid"] += [np.mean(valid_losses) / 2]
                     accuracies["valid"] += [np.mean(valid_accuracy)]
                     log_gaussians["valid"] += [np.mean(valid_log_gauss)]
-                    vars['valid'] += [np.mean(valid_log_var)]
+                    vars['valid'] += [np.mean(valid_var)]
                     if self.verbose > 0:
                         print("Epoch: {}:\t"
                               "Valid Loss: {:.5f} , "
                               "Accuracy: {:.3f} "
-                              "confidence: {:.3f} "
-                              "Vars: {:.3f} "
+                              "confidence: {:.9f} "
+                              "Vars: {:.9f} "
                               .format(epoch,
                                       losses["valid"][-1],
                                       accuracies["valid"][-1],
@@ -437,11 +467,11 @@ class Train:
                     valid_losses = []
                     valid_accuracy = []
                     valid_log_gauss = []
-                    valid_log_var = []
+                    valid_var = []
 
                 mode = 'valid'
                 if epoch > 1 and epoch % self.epochs_per_print == 0:
-                    if (losses[mode][-1] < best_loss or best_loss == -1) \
+                    if (losses[mode][-1] > best_loss or best_loss == -1) \
                             and not np.isnan(losses[mode][-1]):
                         if self.verbose > 1:
                             print('BEST EPOCH!', losses[mode][-1], accuracies[mode][-1])
@@ -486,6 +516,7 @@ class Train:
                                         resblocks=resblocks,
                                         h_last=None,
                                         n_elements=None,
+                                        n_kernels=self.n_kernels
                                         )
 
                 if self.plot_perform:
@@ -506,9 +537,9 @@ if __name__ == "__main__":
 
     random.seed(10)
 
-    size = 64
-    in_channels = [1, 32, 64, 128, 256, 512]
-    out_channels = [32, 64, 128, 256, 512, 512]
+    size = 32
+    in_channels = [1, 64, 128, 256, 512]
+    out_channels = [64, 128, 256, 512, 512]
     kernel_sizes = [3, 3, 3, 3, 3, 3]
     strides = [1, 1, 1, 1, 1, 1]
     dilatations = [1, 1, 1, 1, 1, 1]
@@ -517,15 +548,17 @@ if __name__ == "__main__":
     maxpool = 2
     has_dense = True
     batchnorm = True
-    gated = True
+    gated = False
     resblocks = True
-    checkpoint_path = "checkpoints"
+    checkpoint_path = "/run/media/simon/DATA&STUFF/data/checkpoints"
+    # if checkpoint_path not in os.listdir("/run/media/simon/DATA&STUFF/data/"):
+    #    os.mkdir(checkpoint_path)
     path = '/run/media/simon/DATA&STUFF/data/train_32x32/'
     basedir = '/run/media/simon/DATA&STUFF/data/'
     path = basedir + '/train' + '_' + str(size) + 'x' + str(size) + '/'
 
-    n_epochs = 500
-    save = False
+    n_epochs = 5000
+    save = True
     train_csv = '/run/media/simon/DATA&STUFF/data/train.csv'
     training = Train(train_csv,
                      in_channels=in_channels,
@@ -544,11 +577,12 @@ if __name__ == "__main__":
                      batchnorm=batchnorm,
                      save=save,
                      maxpool=maxpool,
-                     activation=torch.nn.ReLU,
+                     activation=torch.nn.GELU,
                      init_func=torch.nn.init.kaiming_uniform_,
                      n_classes=1,
-                     epochs_per_print=10,
-                     size=size
+                     epochs_per_print=1,
+                     size=size,
+                     n_kernels=10
                      )
     best_parameters, values, experiment, model = optimize(
         parameters=[
@@ -560,7 +594,7 @@ if __name__ == "__main__":
             {"name": "optimizer", "type": "choice", "values": ['adamw', 'adamw']},
             {"name": "weight_decay", "type": "range", "bounds": [1e-14, 1e-1], "log_scale": True},
             {"name": "momentum", "type": "range", "bounds": [0.9, 1.]},
-            {"name": "learning_rate", "type": "range", "bounds": [1e-1, 1e-0], "log_scale": True},
+            {"name": "learning_rate", "type": "range", "bounds": [1e-2, 1e-1], "log_scale": True},
         ],
         evaluation_function=training.train,
         objective_name='loss',

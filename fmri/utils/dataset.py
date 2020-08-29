@@ -288,8 +288,10 @@ def load_checkpoint(checkpoint_path,
                     h_last,
                     n_elements,
                     predict,
+                    n_kernels,
                     name="vae_1dcnn",
-                    model_name=Autoencoder3DCNN
+                    model_name=Autoencoder3DCNN,
+
 
                     ):
     # if checkpoint_path
@@ -305,8 +307,8 @@ def load_checkpoint(checkpoint_path,
         "train": [],
         "valid": [],
     }
-    if checkpoint_path not in os.listdir() and not predict:
-        os.mkdir(checkpoint_path)
+    # if checkpoint_path not in os.listdir() and not predict:
+    #     os.mkdir(checkpoint_path)
     if name not in os.listdir(checkpoint_path) and not predict:
         print("Creating checkpoint...")
         if save:
@@ -341,7 +343,8 @@ def load_checkpoint(checkpoint_path,
                             resblocks=resblocks,
                             h_last=z_dim,
                             n_elements=n_elements,
-                            model_name=Autoencoder3DCNN
+                            model_name=Autoencoder3DCNN,
+                            n_kernels=n_kernels
                             )
     checkpoint_dict = torch.load(checkpoint_path + '/' + name, map_location='cpu')
     epoch = checkpoint_dict['epoch']
@@ -389,6 +392,7 @@ def save_checkpoint(model,
                     resblocks,
                     h_last,
                     n_elements,
+                    n_kernels,
                     flow_type='vanilla',
                     best_loss=-1,
                     has_dense=True,
@@ -487,6 +491,8 @@ def save_checkpoint(model,
                              padding,
                              batchnorm,
                              n_classes,
+                             n_kernels=n_kernels,
+                             max_fvc=model.max_fvc,
                              is_bayesian=is_bayesian,
                              activation=torch.nn.ReLU,
                              n_res=n_res,

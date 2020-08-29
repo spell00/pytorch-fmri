@@ -9,6 +9,8 @@ import torch.nn.functional as F
 from medicaltorch import transforms as mt_transforms
 from torch.distributions import Beta
 from torch.distributions.gamma import Gamma
+import math
+import numpy as np
 
 if torch.cuda.is_available():
     device = 'cuda'
@@ -23,14 +25,52 @@ def random_init(m, init_func=torch.nn.init.xavier_uniform_):
             m.bias.data.zero_()
 
 
-class GaussianSample(nn.Module):
+def log_gaussian(x, mu, log_var):
+    """
+    Returns the log pdf of a normal distribution parametrised
+    by mu and log_var evaluated at x.
+
+    :param x: point to evaluate
+    :param mu: mean of distribution
+    :param log_var: log variance of distribution
+    :return: log N(x|µ,σ)
+    """
+    log_pdf = - 0.5 * torch.log(2 * torch.tensor(math.pi, requires_grad=True)) - log_var / 2 - (x - mu)**2 / (2 * torch.exp(log_var))
+    return torch.sum(log_pdf, dim=-1)
+
+
+class Stochastic(nn.Module):
+    """
+    Base stochastic layer that uses the
+    reparametrization trick [Kingma 2013]
+    to draw a sample from a distribution
+    parametrised by mu and log_var.
+    """
+
+    def reparameterize(self, mu):
+        epsilon = Variable(torch.randn(mu.size()), requires_grad=False)
+
+        if mu.is_cuda:
+            epsilon = epsilon.cuda()
+
+        # log_std = 0.5 * log_var
+        # std = exp(log_std)
+        # std = log_var.mul(0.5).exp_()
+
+        # z = std * epsilon + mu
+        z = mu.addcmul(torch.ones_like(epsilon), epsilon)
+
+        return z
+
+
+class GaussianUnitSample(Stochastic):
     """
     Layer that represents a sample from a
     Gaussian distribution.
     """
 
     def __init__(self, in_features, out_features):
-        super(GaussianSample, self).__init__()
+        super(GaussianUnitSample, self).__init__()
         self.in_features = in_features
         self.out_features = out_features
         self.mu = nn.Linear(in_features, out_features).to(device)
@@ -40,6 +80,28 @@ class GaussianSample(nn.Module):
         mu = self.mu(x)
         log_var = F.softplus(self.log_var(x))
 
+        return self.reparameterize(mu), mu, log_var
+
+
+class GaussianBlock(nn.Module):
+    """
+    Layer that represents a sample from a
+    Gaussian distribution.
+    """
+
+    def __init__(self, in_features, out_features, n_kernels=3):
+        super(GaussianBlock, self).__init__()
+        self.n_kernels = n_kernels
+        self.in_features = in_features
+        self.out_features = out_features
+        self.mu = nn.ModuleList([nn.Linear(in_features, out_features) for _ in range(n_kernels)])
+        self.log_var = nn.ModuleList([nn.Linear(in_features, out_features) for _ in range(n_kernels)])
+        self.mu.apply(random_init)
+        self.log_var.apply(random_init)
+
+    def forward(self, x):
+        mu = torch.stack([self.mu[i](x) for i in range(self.n_kernels)])
+        log_var = torch.stack([F.softplus(self.log_var[i](x)) for i in range(self.n_kernels)])
         return x, mu, log_var
 
     def mle(self, x):
@@ -117,6 +179,7 @@ class ConvResnet3D(nn.Module):
                  n_classes,
                  is_bayesian,
                  max_fvc,
+                 n_kernels,
                  random_node='output',
                  activation=torch.nn.ReLU,
                  n_res=3,
@@ -134,10 +197,8 @@ class ConvResnet3D(nn.Module):
 
         self.is_bayesian = is_bayesian
         if is_bayesian:
-            if random_node == "output":
-                self.GaussianSample = GaussianSample(1, 1)
-            elif (random_node == "last"):
-                self.GaussianSample = GaussianSample(1233, 1233)
+            self.GaussianSample = GaussianUnitSample(37, 37)
+        self.GaussianBlock = GaussianBlock(1, 1, n_kernels=n_kernels)
         self.device = device
         self.conv_layers = nn.ModuleList()
         self.deconv_layers = nn.ModuleList()
@@ -180,9 +241,9 @@ class ConvResnet3D(nn.Module):
                     self.resconv += [ResBlock3D(ins, outs, activation, device)]
             self.bns += [nn.BatchNorm3d(num_features=outs)]
         self.dropout3d = nn.Dropout3d(0.5)
-        self.dense1 = torch.nn.Linear(in_features=out_channels[-1], out_features=128)
-        self.dense1_bn = nn.BatchNorm1d(num_features=128)
-        self.dense2 = torch.nn.Linear(in_features=128 + 5, out_features=n_classes)  # 5 parameters added here
+        self.dense1 = torch.nn.Linear(in_features=out_channels[-1], out_features=32)
+        self.dense1_bn = nn.BatchNorm1d(num_features=32)
+        self.dense2 = torch.nn.Linear(in_features=32 + 5, out_features=n_classes)  # 5 parameters added here
         self.dense2_bn = nn.BatchNorm1d(num_features=n_classes)
         self.dropout = nn.Dropout(0.5)
         self.log_softmax = torch.nn.functional.log_softmax
@@ -224,10 +285,11 @@ class ConvResnet3D(nn.Module):
         z = self.activation(z)
         z = self.dropout(z)
         z = torch.cat([z, patient_info], dim=1)
+        if self.is_bayesian:
+            z, _, _ = self.GaussianSample.float()(z)
         z = self.dense2(z)
         z = torch.sigmoid_(z)
-        if self.is_bayesian:
-            z, mu, log_var = self.GaussianSample.float()(z)
+        z, mu, log_var = self.GaussianBlock.float()(z)
 
         # if self.batchnorm:
         #     if z.shape[0] != 1:

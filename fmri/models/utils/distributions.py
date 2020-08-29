@@ -27,6 +27,10 @@ def log_gaussian(x, mu, log_var):
     return torch.sum(log_pdf, dim=-1)
 
 
+def log_gaussian(x, mu, sigma):
+    return -0.5 * torch.log(2 * torch.tensor(math.pi, requires_grad=True)) - torch.log(torch.abs_(sigma)) - (x - mu) ** 2 / (2 * sigma ** 2)
+
+
 def log_standard_categorical(p):
     """
     Calculates the cross entropy between a (one-hot) categorical vector
