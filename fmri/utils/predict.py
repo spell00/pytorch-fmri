@@ -164,7 +164,7 @@ class Predict:
                              gated=self.gated,
                              has_dense=self.has_dense,
                              resblocks=self.resblocks,
-                             max_fvc=self.max_fc
+                             max_fvc=self.max_fvc
                              ).to(device)
         l1 = nn.L1Loss()
         if optimizer_type == 'adamw':
